@@ -14,6 +14,10 @@ The system is built to be run on a schedule (e.g., once a day), saving significa
 * **Detailed Logging & Summary:** Provides real-time feedback in the terminal and saves a detailed log file in the /logs directory. A complete summary is displayed after every run.  
 * **Secure & Professional Structure:** Follows best practices by separating source code, data, and logs, and uses a .env file to keep credentials safe and out of the main codebase.
 
+## **Project in Action**
+
+Here is a live demo of the script running. It identifies new/missed jobs, extracts the contact details, sends personalized emails, and provides a final summary.
+
 ## **How It Works: The Automation Workflow**
 
 The system is orchestrated by the run\_automation.py script, which executes a two-step process:
@@ -21,7 +25,7 @@ The system is orchestrated by the run\_automation.py script, which executes a tw
 1. **Scrape (scraper.py):**  
    * Scans the target URLs from src/config.py.  
    * Gathers all jobs posted in the last 5 days.  
-   * Filters these jobs against the keyword lists in config.py.  
+   * Filters these jobs against the keyword lists in src/config.py.  
    * Checks its "memory" (processed\_jobs.csv) to discard jobs it has already seen.  
    * Extracts the email address for new, matching jobs.  
    * Saves the results to a new timestamped CSV file in /data/leads/.  
@@ -36,6 +40,8 @@ The system is orchestrated by the run\_automation.py script, which executes a tw
 For the script to work correctly, your project folder must be set up as follows. The setup guide below will help you create the missing files.
 
 /JOB\_AUTO/  
+├── assets/  
+│   └── demo.gif  
 ├── data/  
 │   └── leads/  
 ├── logs/  
@@ -98,4 +104,15 @@ Open **src/config.py**. This is your central control panel. You can easily edit 
 
 To run the entire automation workflow, execute the master script from the main project directory:
 
-python run\_automation.py  
+python run\_automation.py
+
+The script will:
+
+* Automatically create the data/leads/ and logs/ folders if they don't exist.  
+* Provide detailed real-time updates in your terminal.  
+* Save a comprehensive log file to the /logs folder.  
+* Display a final summary of its actions upon completion.
+
+### **A Note on Security**
+
+This project includes a .gitignore file to ensure that your sensitive information (.env file) and data/log files are **never** uploaded to a public GitHub repository. This is a critical security and best-practice measure.
