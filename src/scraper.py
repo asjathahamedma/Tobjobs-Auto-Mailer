@@ -6,9 +6,17 @@ from datetime import datetime, timedelta
 import time
 import os
 import logging
-from src.config import CATEGORY_URLS, LEVEL_KEYWORDS, ROLE_KEYWORDS, REQUIRE_REMOTE, TRACKING_FILE
+from src.config import (
+    CATEGORY_URLS,
+    LEVEL_KEYWORDS,
+    ROLE_KEYWORDS,
+    ROLES_WITHOUT_LEVEL_CHECK,
+    REQUIRE_REMOTE,
+    TRACKING_FILE
+)
 
-# Get the logger instance configured in run_automation.py
+# Get the logger instance configured in other parts of the project
+# If running this file standalone, basic logging will be used.
 logger = logging.getLogger('JobAutomation')
 
 def load_processed_jobs(filename):
@@ -23,6 +31,8 @@ def load_processed_jobs(filename):
 
 def save_processed_jobs(filename, url_set):
     """Saves the updated set of processed job URLs to the tracking file."""
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     df = pd.DataFrame(list(url_set), columns=['url'])
     df.to_csv(filename, index=False)
 
@@ -30,7 +40,7 @@ def get_job_links(category_url):
     """Scrapes a category page for job links, titles, and their posting dates."""
     logger.info(f"Fetching job links from: {category_url}")
     job_details = []
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     try:
         response = requests.get(category_url, headers=headers, timeout=20)
         response.raise_for_status()
@@ -102,6 +112,7 @@ def main():
             if job['url'] not in unique_urls:
                 all_jobs_details.append(job)
                 unique_urls.add(job['url'])
+        time.sleep(1)
     
     summary["total_found"] = len(all_jobs_details)
     logger.info("-" * 50)
@@ -113,24 +124,36 @@ def main():
     jobs_to_process = []
     for job in all_jobs_details:
         title_lower = job['title'].lower()
-        level_match = any(level in title_lower for level in LEVEL_KEYWORDS)
-        role_match = any(role in title_lower for role in ROLE_KEYWORDS)
         
-        is_match = level_match and role_match
+        is_match = False
+        matched_role = None
+        for role in ROLE_KEYWORDS:
+            if role in title_lower:
+                matched_role = role
+                break
+        
+        if matched_role:
+            is_exception = matched_role in ROLES_WITHOUT_LEVEL_CHECK
+            has_level_keyword = any(level in title_lower for level in LEVEL_KEYWORDS)
+            
+            if is_exception or has_level_keyword:
+                is_match = True
+        
         if REQUIRE_REMOTE:
             is_match = is_match and 'remote' in title_lower
 
         if is_match:
             summary["matching_criteria"] += 1
             if start_date <= job['date'] <= today and job['url'] not in processed_urls:
-                logger.info(f"  [MATCH FOUND] New/missed job from {job['date']}: {job['title']}")
+                logger.info(f"  [MATCH FOUND] New job from {job['date']}: {job['title']}")
                 jobs_to_process.append(job)
 
     summary["new_leads_found"] = len(jobs_to_process)
     if not jobs_to_process:
-        logger.info("\nNo new or missed jobs found within the last 5 days that match your criteria.")
+        logger.info("\nNo new jobs found within the last 5 days that match your criteria.")
         return summary
         
+    # ⭐ THIS IS THE CORRECTED LINE ⭐
     logger.info(f"\nFound {summary['new_leads_found']} jobs to process. Starting extraction...")
     logger.info("-" * 50)
 
@@ -146,15 +169,23 @@ def main():
         time.sleep(1)
 
     if final_job_data:
+        leads_dir = os.path.join("data", "leads")
+        os.makedirs(leads_dir, exist_ok=True)
+        
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        filename = os.path.join("data", "leads", f'topjobs_leads_{timestamp}.csv')
+        filename = os.path.join(leads_dir, f'topjobs_leads_{timestamp}.csv')
+        
         df = pd.DataFrame(final_job_data)
         df = df[['title', 'email', 'url']] 
         df.to_csv(filename, index=False, encoding='utf-8')
         logger.info(f"\nSaved {len(df)} new job leads to '{filename}'")
+        
         updated_processed_urls = processed_urls.union(newly_processed_urls)
         save_processed_jobs(TRACKING_FILE, updated_processed_urls)
         logger.info(f"Updated '{TRACKING_FILE}' with {len(newly_processed_urls)} new jobs.")
     
     return summary
 
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    main()
