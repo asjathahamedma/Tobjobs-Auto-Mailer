@@ -119,7 +119,7 @@ def main():
     logger.info(f"Collected {summary['total_found']} unique jobs. Applying filters...")
 
     today = datetime.now().date()
-    start_date = today - timedelta(days=5)
+    start_date = today - timedelta(days=2)
     
     jobs_to_process = []
     for job in all_jobs_details:

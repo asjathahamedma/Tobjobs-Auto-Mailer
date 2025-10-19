@@ -9,7 +9,7 @@ LEVEL_KEYWORDS = [
 ROLE_KEYWORDS = [
     'cyber security', 'network engineer', 'it administrator', 'system administrator', 
     'it support', 'security analyst', 'penetration tester', 'network security', 
-    'devops', 'python', 'firewall', 'active directory', 'it executive','techops', 'technical support'
+    'devops', 'python', 'firewall', 'active directory', 'it executive','techops', 'technical support','cloud','frontend','nextjs','software'
 ]
 
 # Roles that should be accepted regardless of the experience level mentioned
