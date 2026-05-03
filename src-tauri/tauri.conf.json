@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TopJobs Auto Mailer",
+  "version": "2.0.0",
+  "identifier": "com.asjath.topjobsautomailer",
+  "build": {
+    "beforeDevCommand": "run_npm.bat run dev",
+    "beforeBuildCommand": "run_npm.bat run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "TopJobs Auto Mailer",
+        "width": 1600,
+        "height": 980,
+        "minWidth": 1024,
+        "minHeight": 680,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "resources": [
+      "../.venv",
+      "../desktop_app",
+      "../src",
+      "../tauri_bridge",
+      "../run_automation.py",
+      "../requirements.txt"
+    ],
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

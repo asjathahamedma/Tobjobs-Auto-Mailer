@@ -1,118 +1,126 @@
-# **TopJobs.lk Automated Job Scraper & Applier**
+# TopJobs Auto Mailer
 
-This project is a comprehensive automation tool designed to streamline the job search process on TopJobs.lk. It automates the entire workflow: finding relevant job listings based on highly specific criteria, extracting contact information, and sending personalized email applications with a CV attached.
+TopJobs Auto Mailer is a Windows desktop app that searches TopJobs.lk, matches jobs against resume profiles, and helps send tailored applications through Gmail.
 
-The system is built to be run on a schedule (e.g., once a day), saving significant time and effort while ensuring you never miss a relevant opportunity.
+Version 2 rebuilt the old Python script into a production-style desktop app using **Tauri + React + Tailwind + Vite**, while keeping the existing Python automation engine.
 
-## **Key Features**
+## Workflow Demo
 
-* **Multi-Category Scraping:** Scans multiple IT-related categories on TopJobs.lk to gather a wide range of listings.  
-* **Advanced Combination Filtering:** Filters jobs with high precision by requiring a match from **both** an experience level keyword (e.g., "Junior", "Intern") AND a technical role keyword (e.g., "Cyber Security", "Network Engineer").  
-* **Intelligent Memory:** Keeps track of jobs it has already processed in data/processed\_jobs.csv. It won't re-apply for the same job, but it will catch any matching jobs posted within the last 5 days that it might have missed.  
-* **Dynamic Email Generation:** Avoids sending generic, repetitive emails. It dynamically constructs a unique, professional email for each application by mixing different phrases and sentences.  
-* **Resume-Infused Content:** Automatically includes a professional summary and a full signature with contact details and portfolio links in every email.  
-* **Detailed Logging & Summary:** Provides real-time feedback in the terminal and saves a detailed log file in the /logs directory. A complete summary is displayed after every run.  
-* **Secure & Professional Structure:** Follows best practices by separating source code, data, and logs, and uses a .env file to keep credentials safe and out of the main codebase.
+[Watch the Version 2 workflow demo](docs/media/topjobs-automailer-workflow-v2.mp4)
 
-## **Project in Action**
+## Download Installer
 
-Here is a live demo of the script running. It identifies new/missed jobs, extracts the contact details, sends personalized emails, and provides a final summary.
+Download the latest Windows installer from the GitHub Releases page:
 
-## **How It Works: The Automation Workflow**
+[TopJobs Auto Mailer Releases](https://github.com/asjathahamedma/Tobjobs-Auto-Mailer/releases)
 
-The system is orchestrated by the run\_automation.py script, which executes a two-step process:
+For Version 2, upload this installer as the release asset:
 
-1. **Scrape (scraper.py):**  
-   * Scans the target URLs from src/config.py.  
-   * Gathers all jobs posted in the last 5 days.  
-   * Filters these jobs against the keyword lists in src/config.py.  
-   * Checks its "memory" (processed\_jobs.csv) to discard jobs it has already seen.  
-   * Extracts the email address for new, matching jobs.  
-   * Saves the results to a new timestamped CSV file in /data/leads/.  
-2. **Apply (mailer.py):**  
-   * Finds the most recent leads file created by the scraper.  
-   * Loads your credentials securely from the .env file.  
-   * For each job, it generates a unique email, attaches your CV, and sends the application.  
-   * Updates the memory file (processed\_jobs.csv) with the jobs it just processed.
+`TopJobs Auto Mailer_2.0.0_x64-setup.exe`
 
-## **Project Structure**
+Do not commit the installer into the repository. The installer is a large build artifact and belongs in GitHub Releases.
 
-For the script to work correctly, your project folder must be set up as follows. The setup guide below will help you create the missing files.
+## Version 2 Features
 
-/JOB\_AUTO/  
-├── assets/  
-│   └── demo.gif  
-├── data/  
-│   └── leads/  
-├── logs/  
-├── src/  
-│   ├── \_\_init\_\_.py  
-│   ├── config.py  
-│   ├── scraper.py  
-│   ├── mailer.py  
-│   └── utils.py  
-├── .env  
-├── Asjath-Ahamed-Mohamed-Aazath.pdf  
-├── requirements.txt  
-└── run\_automation.py
+- Modern desktop UI with Dashboard, Jobs, Resume Profiles, and Settings pages.
+- Start and stop the automation from the app UI.
+- Live workflow progress, logs, stage counter, and progress bar.
+- Today Summary with scanned, reviewed, matched, skipped, and applied totals.
+- Skip reason breakdown for no email, already applied, low fit, senior role, excluded role, remote required, and missing resume.
+- Profile performance analytics showing which resume/profile gets the most matches and applications.
+- Jobs table with filters, match score, resume used, status badge, skipped reason, and apply status.
+- Resume import flow that analyzes a PDF and creates an editable resume profile.
+- Local history from SQLite, CSV files, and logs.
+- Windows startup automation can be enabled or disabled from Settings.
 
-## **Setup and Installation Guide**
+## How It Works
 
-Follow these steps carefully to set up and run the project for the first time.
+1. Add sender details in Settings.
+2. Import one or more PDF resumes in Resume Profiles.
+3. The app creates resume profiles with detected title keywords, description keywords, and summaries.
+4. Start the workflow from the Dashboard.
+5. Python automation scans TopJobs, filters jobs by date and role fit, chooses the matching resume profile, and applies when an email is available.
+6. The UI shows live progress and stores the result history locally.
 
-### **Prerequisites**
+## Email Login
 
-* [Python](https://www.python.org/downloads/) (version 3.9 or higher)  
-* [Git](https://git-scm.com/downloads/)
+Current Version 2 email sending uses a Gmail address plus Gmail App Password.
 
-### **Step 1: Clone the Repository**
+Google OAuth is planned for a future public release so users can connect their Google account without manually creating an app password.
 
-Open your terminal or command prompt and run the following command to download the project:
+## Tech Stack
 
-git clone \[https://github.com/asjathahamedma/Tobjobs-Auto-Mailer.git\](https://github.com/asjathahamedma/Tobjobs-Auto-Mailer.git)  
-cd Tobjobs-Auto-Mailer
+- `ui/` - React, Tailwind CSS, Vite, Framer Motion
+- `src-tauri/` - Tauri Windows desktop shell
+- `tauri_bridge/` - Python bridge used by the Tauri app
+- `src/` - TopJobs scraper, mailer, config, and matching logic
+- `desktop_app/` - history, startup, profile import, and app services
+- `run_automation.py` - main Python automation entrypoint
 
-### **Step 2: Create the Environment File (.env)**
+## Local Development
 
-This file will store your secret email credentials.
+Install dependencies:
 
-1. Create the file in the main project directory.  
-   * In your terminal: touch .env (macOS/Linux) or echo. \> .env (Windows)  
-2. Open the .env file and add the following content, replacing the placeholders with your information.  
-   **IMPORTANT:** For Gmail, you must generate a 16-digit **App Password**. Your regular Google account password will not work and will result in an authentication error.  
-   * Go to your Google Account \-\> Security \-\> 2-Step Verification (must be ON) \-\> App passwords.
+```powershell
+npm install
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+```
 
-\# Enter your Gmail address and your 16-digit Google App Password  
-EMAIL\_ADDRESS="your-email@gmail.com"  
-EMAIL\_PASSWORD="your-16-digit-app-password"
+Run the desktop app in development:
 
-### **Step 3: Place Your CV**
+```powershell
+npm run tauri:dev
+```
 
-Make sure your resume PDF file (e.g., Asjath-Ahamed-Mohamed-Aazath.pdf) is placed in the main project directory. If your filename is different, update it in src/config.py.
+Build the production installer:
 
-### **Step 4: Install Dependencies**
+```powershell
+.\build_desktop_app.bat
+```
 
-Install all the required Python packages by running:
+The installer is generated at:
 
-pip install \-r requirements.txt
+```text
+src-tauri/target/release/bundle/nsis/TopJobs Auto Mailer_2.0.0_x64-setup.exe
+```
 
-### **Step 5: Configure Your Search (Optional)**
+## Publishing Version 2
 
-Open **src/config.py**. This is your central control panel. You can easily edit the LEVEL\_KEYWORDS, ROLE\_KEYWORDS, your name, and your portfolio links to customize the automation for your needs without touching the core logic.
+Commit and push the source code:
 
-## **Usage**
+```powershell
+git add .
+git commit -m "Release TopJobs Auto Mailer v2"
+git push origin main
+```
 
-To run the entire automation workflow, execute the master script from the main project directory:
+Create and push the Version 2 tag:
 
-python run\_automation.py
+```powershell
+git tag v2.0.0
+git push origin v2.0.0
+```
 
-The script will:
+Then create a GitHub Release from tag `v2.0.0` and upload:
 
-* Automatically create the data/leads/ and logs/ folders if they don't exist.  
-* Provide detailed real-time updates in your terminal.  
-* Save a comprehensive log file to the /logs folder.  
-* Display a final summary of its actions upon completion.
+```text
+src-tauri/target/release/bundle/nsis/TopJobs Auto Mailer_2.0.0_x64-setup.exe
+```
 
-### **A Note on Security**
+## Local Data
 
-This project includes a .gitignore file to ensure that your sensitive information (.env file) and data/log files are **never** uploaded to a public GitHub repository. This is a critical security and best-practice measure.
+The app stores runtime data locally and does not commit it to GitHub:
+
+- `.env`
+- `resumes/`
+- `data/`
+- `logs/`
+- `.venv/`
+- `src-tauri/target/`
+
+## Notes
+
+- This app automates email-based applications only when a job email is found.
+- Users should review their resume profiles and settings before enabling automation.
+- TopJobs pages can change over time, so scraper behavior may need updates if the website changes.

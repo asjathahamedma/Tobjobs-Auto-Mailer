@@ -2,8 +2,28 @@
 .env
 
 # Python cache
+.venv/
 __pycache__/
+*.pyc
+
+# Node / frontend
+node_modules/
+ui/dist/
+*.tsbuildinfo
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
 
 # Data and Log files
 data/
 logs/
+
+# Local/private user files
+resumes/
+*.pdf
+
+# Build outputs and release artifacts
+dist/
+*.exe
+*.msi

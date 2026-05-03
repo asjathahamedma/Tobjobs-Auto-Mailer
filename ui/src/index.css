@@ -1,0 +1,153 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    background: #f4f7fe;
+    color: #1b2559;
+  }
+
+  * {
+    @apply box-border;
+  }
+
+  html {
+    @apply h-full scroll-smooth overflow-hidden;
+  }
+
+  body {
+    @apply h-screen overflow-hidden bg-horizon-background text-horizon-text antialiased;
+    background-image:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(244, 247, 254, 0.94) 42%, #eef4fb 100%);
+  }
+
+  #root {
+    @apply h-screen overflow-hidden;
+  }
+
+  ::selection {
+    @apply bg-brand-600/20 text-brand-900;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400;
+  }
+}
+
+@layer components {
+  .page-shell {
+    @apply min-w-0 space-y-6;
+  }
+
+  .page-shell > * {
+    min-width: 0;
+  }
+
+  .panel {
+    @apply min-w-0 rounded-[22px] border border-horizon-border bg-white shadow-horizon transition-all duration-300;
+  }
+
+  .panel:hover {
+    @apply -translate-y-0.5 shadow-[0_22px_48px_rgba(112,144,176,0.16)];
+  }
+
+  .panel-header {
+    @apply flex flex-col gap-4 border-b border-horizon-border px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between;
+  }
+
+  .panel-body {
+    @apply min-w-0 p-5 sm:p-6;
+  }
+
+  .profile-card {
+    @apply relative overflow-hidden;
+  }
+
+  .profile-card::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-brand-600/30 to-transparent;
+  }
+
+  .action-button {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-transparent px-4 py-2.5 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-brand-200/70 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .action-button:hover {
+    @apply -translate-y-0.5;
+  }
+
+  .action-button:active {
+    @apply translate-y-0 scale-[0.99];
+  }
+
+  .action-button-primary {
+    @apply bg-brand-600 text-white shadow-soft hover:bg-brand-700;
+  }
+
+  .action-button-secondary {
+    @apply border-horizon-border bg-white text-horizon-text hover:border-brand-200 hover:bg-brand-50;
+  }
+
+  .action-button-accent {
+    @apply bg-horizon-success text-white shadow-[0_10px_24px_rgba(5,205,153,0.18)] hover:bg-[#04b687];
+  }
+
+  .action-button-ghost {
+    @apply border-horizon-border bg-white/80 text-horizon-text hover:border-brand-200 hover:bg-brand-50;
+  }
+
+  .input-base {
+    @apply h-12 min-w-0 w-full rounded-xl border border-horizon-border bg-[#fbfcff] px-4 text-sm text-horizon-text shadow-[inset_0_1px_2px_rgba(15,23,42,0.03)] transition-all duration-200 placeholder:text-horizon-muted focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100/80;
+  }
+
+  .textarea-base {
+    @apply min-h-[136px] min-w-0 w-full rounded-xl border border-horizon-border bg-[#fbfcff] px-4 py-3 text-sm text-horizon-text shadow-[inset_0_1px_2px_rgba(15,23,42,0.03)] transition-all duration-200 placeholder:text-horizon-muted focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100/80;
+    resize: vertical;
+  }
+
+  .table-shell {
+    @apply min-w-0 max-w-full overflow-hidden rounded-2xl border border-horizon-border bg-white;
+  }
+
+  .table-head {
+    @apply bg-horizon-background text-left text-xs font-bold uppercase tracking-[0.22em] text-horizon-muted;
+  }
+
+  .table-cell {
+    @apply break-words border-t border-horizon-border px-4 py-4 align-top text-sm text-horizon-text;
+  }
+
+  .field-shell {
+    @apply min-w-0 rounded-2xl border border-horizon-border bg-horizon-background px-4 py-4;
+  }
+
+  .field-label {
+    @apply mb-2 text-sm font-semibold text-horizon-text;
+  }
+
+  .field-value {
+    @apply block break-words text-sm text-horizon-text;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply border border-white/60 bg-white/70 backdrop-blur-xl;
+  }
+}

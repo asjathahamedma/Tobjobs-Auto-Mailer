@@ -4,3 +4,4 @@ pandas
 easyocr
 python-dotenv
 opencv-python
+pypdf
