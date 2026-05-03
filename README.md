@@ -8,17 +8,23 @@ Version 2 rebuilt the old Python script into a production-style desktop app usin
 
 [Watch the Version 2 workflow demo](docs/media/topjobs-automailer-workflow-v2.mp4)
 
-## Download Installer
+## Download and Install
 
-Download the latest Windows installer from the GitHub Releases page:
+Normal users only need the Windows setup file. They do not need to download the source code, install Python, install Node.js, or run any commands.
+
+1. Open the GitHub Releases page:
 
 [TopJobs Auto Mailer Releases](https://github.com/asjathahamedma/Tobjobs-Auto-Mailer/releases)
 
-For Version 2, upload this installer as the release asset:
+2. Download the latest setup file:
 
 `TopJobs Auto Mailer_2.0.0_x64-setup.exe`
 
-Do not commit the installer into the repository. The installer is a large build artifact and belongs in GitHub Releases.
+3. Double-click the setup file and install the app.
+
+4. Open TopJobs Auto Mailer, add your Gmail/app password details, import your resumes, and start the workflow.
+
+Developer note: the installer is a large build artifact, so it is uploaded to GitHub Releases instead of being committed into this repository.
 
 ## Version 2 Features
 
