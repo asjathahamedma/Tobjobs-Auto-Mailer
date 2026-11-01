@@ -29,10 +29,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
+          enable-cache: true
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -42,18 +42,24 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Install bundled Python runtime dependencies
+      - name: Install portable Python runtime and dependencies
         shell: pwsh
         run: |
-          python -m venv .venv
-          .\.venv\Scripts\python.exe -m pip install --upgrade pip
-          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+          uv python install 3.12 --install-dir .python
+          $python = Get-ChildItem .python -Filter python.exe -Recurse |
+            Where-Object { $_.FullName -notmatch '\\Scripts\\' } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $python) {
+            throw "Could not find python.exe in the portable Python runtime."
+          }
+          "TOPJOBS_PYTHON=$python" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          uv pip install --python $python -r requirements.txt
 
       - name: Validate application
         shell: pwsh
         run: |
           npm run typecheck
-          .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+          & $env:TOPJOBS_PYTHON -m unittest discover -s tests -v
 
       - name: Build Windows installer
         run: npm run tauri:build

@@ -110,6 +110,21 @@ fn locate_install_dir(resource_root: &Path) -> PathBuf {
 }
 
 fn resolve_python(resource_root: &Path) -> String {
+    let portable_python_dir = resource_root.join(".python");
+    let portable_python = portable_python_dir.join("python.exe");
+    if portable_python.exists() {
+        return portable_python.to_string_lossy().to_string();
+    }
+
+    if let Ok(entries) = fs::read_dir(&portable_python_dir) {
+        for entry in entries.flatten() {
+            let candidate = entry.path().join("python.exe");
+            if candidate.exists() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+
     let venv_python = resource_root.join(".venv").join("Scripts").join("python.exe");
     if venv_python.exists() {
         venv_python.to_string_lossy().to_string()
