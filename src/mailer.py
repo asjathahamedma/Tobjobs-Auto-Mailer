@@ -1,7 +1,8 @@
 import glob
+import html
 import logging
 import os
-import random
+import re
 import smtplib
 import ssl
 import time
@@ -10,12 +11,29 @@ from email import encoders
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate
 
 import pandas as pd
 from dotenv import load_dotenv
 
 from src import utils
-from src.config import CONTACT_INFO, ENV_FILE, FEEDBACK_DIR, MAILER_AUTH, TRACKING_FILE, YOUR_NAME, resolve_existing_path
+from src.config import (
+    CONTACT_INFO,
+    ENV_FILE,
+    FEEDBACK_DIR,
+    MAILER_AUTH,
+    TRACKING_FILE,
+    YOUR_NAME,
+    _CONFIG,
+    resolve_existing_path,
+)
 
 logger = logging.getLogger("JobAutomation")
 
@@ -58,73 +76,207 @@ def build_keyword_snippet(row):
 
 def generate_email_content(row):
     """Generates a professional email body and subject based on the matched profile."""
-    job_title = safe_text(row.get("title"))
+    job_title = safe_text(row.get("title")) or "the advertised position"
     profile_summary = safe_text(row.get("profile_summary"))
     keyword_snippet = build_keyword_snippet(row)
-
-    openings = [
-        "I am writing to express my interest in the",
-        "I was excited to come across the",
-        "I am writing to apply for the",
-    ]
-    closings = [
-        "I would welcome the chance to discuss how I can contribute to your team.",
-        "I would be glad to discuss how my background can support this opportunity.",
-        "I would appreciate the opportunity to speak further about how I can add value to your team.",
+    applicant_name = YOUR_NAME.strip() or "Applicant"
+    subject = f"Application for {job_title} - {applicant_name}"
+    paragraphs = [
+        "Dear Hiring Team,",
+        f"I am writing to apply for the {job_title} position advertised on TopJobs.lk.",
     ]
 
-    subject = f"Application for {job_title} - {YOUR_NAME}"
-    body = f"""
-Dear Hiring Manager,
+    if profile_summary:
+        paragraphs.append(
+            f"My attached resume outlines my background relevant to this opportunity. "
+            f"{profile_summary.rstrip('.')}."
+        )
+    else:
+        paragraphs.append(
+            "I have attached my resume for your consideration and would welcome the opportunity "
+            "to discuss how my experience could support your team."
+        )
 
-{random.choice(openings)} {job_title} role advertised on TopJobs.lk.
+    if keyword_snippet != "the responsibilities highlighted in the job description":
+        paragraphs.append(
+            f"The role's focus on {keyword_snippet} is particularly relevant to the profile "
+            "described in my resume."
+        )
 
-{profile_summary} This opportunity stands out to me because it aligns closely with my hands-on work in {keyword_snippet}.
+    paragraphs.extend(
+        [
+            "Thank you for your time and consideration. I would be pleased to provide any further "
+            "information you may need.",
+            "Kind regards,",
+            applicant_name,
+        ]
+    )
 
-My resume is attached for your review, and I would be happy to provide any additional information if needed. {random.choice(closings)}
+    contact_lines = [
+        CONTACT_INFO.get("phone", "").strip(),
+        CONTACT_INFO.get("email", "").strip(),
+    ]
+    paragraphs.extend(line for line in contact_lines if line)
+    for label, key in (
+        ("Portfolio", "portfolio"),
+        ("LinkedIn", "linkedin"),
+        ("GitHub", "github"),
+    ):
+        value = CONTACT_INFO.get(key, "").strip()
+        if value:
+            paragraphs.append(f"{label}: {value}")
 
-Thank you for your time and consideration.
-
-Sincerely,
-
-{YOUR_NAME}
-{CONTACT_INFO['phone']} | {CONTACT_INFO['email']}
-Portfolio: {CONTACT_INFO['portfolio']}
-LinkedIn: {CONTACT_INFO['linkedin']}
-GitHub: {CONTACT_INFO['github']}
-"""
-    return subject, body.strip()
+    return subject, "\n\n".join(paragraphs)
 
 
-def send_email(smtp_server, port, sender_email, password, receiver_email, subject, body, attachment_path):
-    """Connects to the SMTP server and sends a single email with an attachment."""
+def generate_cover_letter_content(row):
+    """Creates a factual, job-specific letter using profile and match evidence."""
+    job_title = safe_text(row.get("title")) or "the advertised position"
+    company = safe_text(row.get("company")) or "your organization"
+    profile_summary = safe_text(row.get("profile_summary"))
+    keyword_snippet = build_keyword_snippet(row)
+    applicant_name = YOUR_NAME.strip() or "Applicant"
+    paragraphs = [
+        "Dear Hiring Manager,",
+        (
+            f"I am writing to apply for the {job_title} position at {company}. "
+            "I learned about this opportunity through TopJobs.lk."
+        ),
+    ]
+
+    if profile_summary:
+        paragraphs.append(
+            f"My resume provides an overview of my background and skills. "
+            f"{profile_summary.rstrip('.')}."
+        )
+    else:
+        paragraphs.append(
+            "I have attached my resume for your consideration and would welcome the opportunity "
+            "to discuss my background in relation to this position."
+        )
+
+    if keyword_snippet != "the responsibilities highlighted in the job description":
+        paragraphs.append(
+            f"The role's focus on {keyword_snippet} aligns with the skills highlighted in my "
+            "resume and is a key reason for my interest in this opportunity."
+        )
+
+    paragraphs.extend(
+        [
+            "Thank you for considering my application. I would be pleased to provide further "
+            "information and discuss my suitability for the role.",
+            "Yours sincerely,",
+            applicant_name,
+        ]
+    )
+    paragraphs.extend(
+        value
+        for value in (
+            CONTACT_INFO.get("phone", "").strip(),
+            CONTACT_INFO.get("email", "").strip(),
+            CONTACT_INFO.get("linkedin", "").strip(),
+            CONTACT_INFO.get("portfolio", "").strip(),
+        )
+        if value
+    )
+    return paragraphs
+
+
+def create_cover_letter_pdf(row):
+    """Writes a formatted PDF cover letter into local application data."""
+    output_dir = os.path.join("data", "cover_letters")
+    os.makedirs(output_dir, exist_ok=True)
+    safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "_", safe_text(row.get("title"))).strip("_")
+    file_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{safe_title or 'application'}.pdf"
+    output_path = os.path.join(output_dir, file_name)
+
+    styles = getSampleStyleSheet()
+    body_style = ParagraphStyle(
+        "CoverLetterBody",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=10.5,
+        leading=16,
+        textColor=colors.HexColor("#283247"),
+        alignment=TA_LEFT,
+        spaceAfter=12,
+    )
+    heading_style = ParagraphStyle(
+        "CoverLetterHeading",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=17,
+        leading=22,
+        textColor=colors.HexColor("#1b2559"),
+        spaceAfter=18,
+    )
+    story = [Paragraph("Application Letter", heading_style)]
+    story.extend(
+        Paragraph(html.escape(paragraph), body_style)
+        for paragraph in generate_cover_letter_content(row)
+    )
+    document = SimpleDocTemplate(
+        output_path,
+        pagesize=letter,
+        rightMargin=0.85 * inch,
+        leftMargin=0.85 * inch,
+        topMargin=0.8 * inch,
+        bottomMargin=0.8 * inch,
+        title=f"Application for {safe_text(row.get('title')) or 'position'}",
+        author=YOUR_NAME.strip() or "Applicant",
+    )
+    document.build(story)
+    return output_path
+
+
+def send_email(
+    smtp_server,
+    port,
+    sender_email,
+    password,
+    receiver_email,
+    subject,
+    body,
+    attachment_path,
+    *,
+    extra_attachments=None,
+):
+    """Sends an application email through Gmail SMTP with attached documents."""
     resolved_attachment_path = resolve_existing_path(attachment_path)
     if not os.path.exists(resolved_attachment_path):
         return False, f"Attachment file was not found: {resolved_attachment_path}"
 
-    try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-            server.login(sender_email, password)
-            message = MIMEMultipart()
-            message["From"] = f"{YOUR_NAME} <{sender_email}>"
-            message["To"] = receiver_email
-            message["Subject"] = subject
-            message.attach(MIMEText(body, "plain"))
+    attachment_paths = [resolved_attachment_path]
+    attachment_paths.extend(resolve_existing_path(path) for path in (extra_attachments or []))
+    for path in attachment_paths:
+        if not os.path.exists(path):
+            return False, f"Attachment file was not found: {path}"
 
-            with open(resolved_attachment_path, "rb") as attachment:
+    try:
+        message = MIMEMultipart()
+        message["From"] = formataddr((YOUR_NAME, sender_email))
+        message["To"] = receiver_email
+        message["Subject"] = subject
+        message.attach(MIMEText(body, "plain", "utf-8"))
+
+        for path in attachment_paths:
+            with open(path, "rb") as attachment:
                 part = MIMEBase("application", "octet-stream")
                 part.set_payload(attachment.read())
-
             encoders.encode_base64(part)
             part.add_header(
                 "Content-Disposition",
-                f"attachment; filename={os.path.basename(attachment_path)}",
+                "attachment",
+                filename=os.path.basename(path),
             )
             message.attach(part)
+
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
+            server.login(sender_email, password)
             server.sendmail(sender_email, receiver_email, message.as_string())
-            time.sleep(5)
-            return True, "Email sent successfully."
+        time.sleep(5)
+        return True, "Email sent successfully."
     except smtplib.SMTPAuthenticationError:
         return False, "SMTP authentication failed. Check EMAIL_ADDRESS and Gmail App Password."
     except Exception as exc:
@@ -155,8 +307,12 @@ def main(progress_callback=None):
     }
 
     load_dotenv(dotenv_path=ENV_FILE)
+    from desktop_app.gmail_credentials import GmailCredentialStore
+
     sender_email = MAILER_AUTH.get("sender_email") or os.getenv("EMAIL_ADDRESS")
-    password = MAILER_AUTH.get("app_password") or os.getenv("EMAIL_PASSWORD")
+    password = GmailCredentialStore().get_password(
+        MAILER_AUTH.get("app_password") or os.getenv("EMAIL_PASSWORD") or ""
+    )
     if progress_callback:
         progress_callback(
             {
@@ -167,7 +323,7 @@ def main(progress_callback=None):
         )
 
     if not sender_email or not password:
-        logger.critical("CRITICAL: EMAIL_ADDRESS or EMAIL_PASSWORD not found in .env file.")
+        logger.critical("CRITICAL: Configure your Gmail address and App Password in Settings.")
         summary["errors"] += 1
         return summary
 
@@ -255,6 +411,11 @@ def main(progress_callback=None):
             logger.info(f" -> Skipped. {note}")
         else:
             subject, body = generate_email_content(row)
+            cover_letter_path = (
+                create_cover_letter_pdf(row)
+                if _CONFIG["mailer"].get("attach_cover_letter", True)
+                else None
+            )
             sent, send_note = send_email(
                 smtp_server,
                 port,
@@ -264,6 +425,7 @@ def main(progress_callback=None):
                 subject,
                 body,
                 resume_path,
+                extra_attachments=[cover_letter_path] if cover_letter_path else [],
             )
 
             if sent:

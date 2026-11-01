@@ -34,9 +34,11 @@ export function DashboardPage({ snapshot, liveLogs, running, config, progress }:
       helper: "Add the full name used in your application emails.",
     },
     {
-      label: "Gmail credentials",
-      done: Boolean(config?.mailer.auth.sender_email.trim() && config?.mailer.auth.app_password.trim()),
-      helper: "Save the Gmail address and app password in Settings.",
+      label: "Email connection setup",
+      done: Boolean(
+        config?.mailer.auth.sender_email.trim() && config.mailer.auth.app_password_configured
+      ),
+      helper: "Set a Gmail address and app password in Settings.",
     },
     {
       label: "Resume profiles",
@@ -130,7 +132,7 @@ export function DashboardPage({ snapshot, liveLogs, running, config, progress }:
         </div>
       </SectionCard>
 
-      <div className="grid gap-5 xl:grid-cols-5">
+      <div className="grid gap-5 xl:grid-cols-3 2xl:grid-cols-6">
         <StatCard
           title="Jobs Found"
           value={summary?.searched ?? 0}
@@ -165,6 +167,13 @@ export function DashboardPage({ snapshot, liveLogs, running, config, progress }:
           caption="Jobs successfully sent through the mailer."
           icon={<CheckCircle2 className="h-6 w-6" />}
           tone="success"
+        />
+        <StatCard
+          title="Match Rate"
+          value={`${summary?.match_rate ?? 0}%`}
+          caption="Matched roles as a share of all jobs found."
+          icon={<BarChart3 className="h-6 w-6" />}
+          tone="info"
         />
       </div>
 
@@ -241,7 +250,7 @@ export function DashboardPage({ snapshot, liveLogs, running, config, progress }:
                     <BarMetric label="Skipped" value={profile.skipped} max={maxProfileValue(profilePerformance, "skipped")} />
                   </div>
                   <p className="mt-3 text-xs font-semibold text-horizon-muted">
-                    Average fit score: {profile.average_fit_score || "N/A"}
+                    Average fit points: {profile.average_fit_score || "N/A"}
                   </p>
                 </div>
               ))

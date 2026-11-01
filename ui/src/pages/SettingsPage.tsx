@@ -1,14 +1,17 @@
-import { MailCheck, ShieldCheck } from "lucide-react";
+import { MailCheck } from "lucide-react";
 
+import { GmailAppPasswordHelp } from "@/components/GmailAppPasswordHelp";
 import type { AppConfig } from "@/lib/types";
 import { parseMultiline, toMultiline } from "@/lib/utils";
 
 interface SettingsPageProps {
   config: AppConfig | null;
+  accountEmail: string;
+  onSignOut: () => void;
   onConfigChange: (config: AppConfig) => void;
 }
 
-export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
+export function SettingsPage({ config, accountEmail, onSignOut, onConfigChange }: SettingsPageProps) {
   if (!config) {
     return <div className="panel p-6 text-sm text-horizon-muted">Loading settings...</div>;
   }
@@ -114,11 +117,24 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
         <section className="panel overflow-hidden">
           <div className="panel-header">
             <div>
-              <h3 className="text-lg font-bold text-horizon-text">Email Connection</h3>
-              <p className="text-sm text-horizon-muted">Current sender access and the public release path.</p>
+              <h3 className="text-lg font-bold text-horizon-text">Local Account</h3>
+              <p className="text-sm text-horizon-muted">This account is stored on this computer only.</p>
+            </div>
+            <button type="button" className="action-button action-button-secondary" onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
+          <div className="panel-body text-sm text-horizon-text">{accountEmail}</div>
+        </section>
+
+        <section className="panel overflow-hidden">
+          <div className="panel-header">
+            <div>
+              <h3 className="text-lg font-bold text-horizon-text">Gmail Connection</h3>
+              <p className="text-sm text-horizon-muted">Your Gmail app password is stored in the operating system credential store.</p>
             </div>
           </div>
-          <div className="panel-body grid gap-4 md:grid-cols-2">
+          <div className="panel-body">
             <div className="rounded-2xl border border-horizon-border bg-horizon-background px-4 py-4">
               <div className="mb-3 flex items-center gap-3">
                 <div className="rounded-xl bg-horizon-success/10 p-3 text-horizon-success">
@@ -126,26 +142,15 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                 </div>
                 <div>
                   <p className="font-semibold text-horizon-text">Gmail App Password</p>
-                  <p className="text-xs text-horizon-muted">Active for this local build</p>
+                  <p className="text-xs text-horizon-muted">
+                    {config.mailer.auth.app_password_configured ? "Saved securely" : "Not configured"}
+                  </p>
                 </div>
               </div>
-              <p className="text-sm text-horizon-muted">
-                Uses the Gmail address and app password saved below.
+              <p className="mb-4 text-sm text-horizon-muted">
+                Use a Gmail app password, not your normal Google password.
               </p>
-            </div>
-            <div className="rounded-2xl border border-dashed border-brand-600/25 bg-brand-600/5 px-4 py-4">
-              <div className="mb-3 flex items-center gap-3">
-                <div className="rounded-xl bg-brand-600/10 p-3 text-brand-600">
-                  <ShieldCheck className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="font-semibold text-horizon-text">Google OAuth</p>
-                  <p className="text-xs text-horizon-muted">Planned for public users</p>
-                </div>
-              </div>
-              <button type="button" className="action-button action-button-secondary w-full" disabled>
-                Connect with Google
-              </button>
+              <GmailAppPasswordHelp />
             </div>
           </div>
         </section>
@@ -184,6 +189,11 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
             <TextField
               label="Gmail App Password"
               value={config.mailer.auth.app_password}
+              placeholder={
+                config.mailer.auth.app_password_configured
+                  ? "Already saved securely; leave blank to keep it"
+                  : "Paste your 16-character Gmail app password"
+              }
               type="password"
               onChange={(value) =>
                 updateConfig((current) => ({
@@ -192,6 +202,16 @@ export function SettingsPage({ config, onConfigChange }: SettingsPageProps) {
                     ...current.mailer,
                     auth: { ...current.mailer.auth, app_password: value },
                   },
+                }))
+              }
+            />
+            <CheckboxField
+              label="Attach a tailored cover letter PDF with applications"
+              checked={config.mailer.attach_cover_letter}
+              onChange={(checked) =>
+                updateConfig((current) => ({
+                  ...current,
+                  mailer: { ...current.mailer, attach_cover_letter: checked },
                 }))
               }
             />
@@ -308,11 +328,13 @@ function CheckboxField({
 function TextField({
   label,
   value,
+  placeholder,
   type = "text",
   onChange,
 }: {
   label: string;
   value: string;
+  placeholder?: string;
   type?: string;
   onChange: (value: string) => void;
 }) {
@@ -323,6 +345,7 @@ function TextField({
         type={type}
         className="input-base"
         value={value}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
     </label>

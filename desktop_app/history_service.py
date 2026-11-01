@@ -75,7 +75,7 @@ class ArtifactHistoryService:
         rejected_count = len(applications) - applied_count
         searched_total = totals.get("total_found", 0)
         matched_total = totals.get("matching_criteria", 0)
-        reviewed_total = totals.get("jobs_reviewed_by_scraper", 0) or searched_total
+        reviewed_total = totals.get("jobs_reviewed_by_scraper", 0)
 
         return {
             "window_days": window_days,
@@ -84,6 +84,9 @@ class ArtifactHistoryService:
             "searched": searched_total,
             "filtered_out": max(searched_total - matched_total, 0),
             "matched": matched_total,
+            "match_rate": round(matched_total / searched_total * 100, 1)
+            if searched_total
+            else 0,
             "reviewed": reviewed_total,
             "applied": applied_count,
             "rejected": rejected_count,
@@ -116,9 +119,9 @@ class ArtifactHistoryService:
         )
         skip_reason_counts = self._build_skip_reason_counts(today_totals, today_status_counts)
         scanned = today_totals.get("total_found", 0)
-        reviewed = today_totals.get("jobs_reviewed_by_scraper", 0) or scanned
+        reviewed = today_totals.get("jobs_reviewed_by_scraper", 0)
         applied = today_status_counts.get("sent", 0) or today_totals.get("emails_sent", 0)
-        skipped = max(sum(skip_reason_counts.values()), scanned - applied, 0)
+        skipped = sum(skip_reason_counts.values())
         return {
             "date": today_key,
             "scanned": scanned,

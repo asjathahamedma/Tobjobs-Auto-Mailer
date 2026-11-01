@@ -275,6 +275,35 @@ fn get_config() -> Result<Value, String> {
 }
 
 #[tauri::command]
+fn get_account_status() -> Result<Value, String> {
+    run_python_json(&["-m", "tauri_bridge.cli", "account-status"], None)
+}
+
+#[tauri::command]
+fn register_account(email: String, password: String) -> Result<Value, String> {
+    run_python_json(
+        &["-m", "tauri_bridge.cli", "account-register"],
+        Some(json!({ "email": email, "password": password }).to_string()),
+    )
+}
+
+#[tauri::command]
+fn login_account(email: String, password: String) -> Result<Value, String> {
+    run_python_json(
+        &["-m", "tauri_bridge.cli", "account-login"],
+        Some(json!({ "email": email, "password": password }).to_string()),
+    )
+}
+
+#[tauri::command]
+fn open_gmail_app_password_page() -> Result<(), String> {
+    let url = "https://myaccount.google.com/apppasswords";
+    let mut command = Command::new("cmd");
+    command.args(["/C", "start", "", url]);
+    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn save_config(config: Value) -> Result<Value, String> {
     run_python_json(
         &["-m", "tauri_bridge.cli", "config-save"],
@@ -354,6 +383,31 @@ fn get_launch_context() -> LaunchContext {
     LaunchContext {
         startup: std::env::args().any(|arg| arg == "--startup"),
     }
+}
+
+#[tauri::command]
+fn open_release_page() -> Result<(), String> {
+    let url = "https://github.com/asjathahamedma/Tobjobs-Auto-Mailer/releases/latest";
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", "", url]);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(url);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(url);
+        command
+    };
+
+    command.spawn().map(|_| ()).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -492,12 +546,17 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             get_config,
+            get_account_status,
+            register_account,
+            login_account,
+            open_gmail_app_password_page,
             save_config,
             get_resume_inventory,
             import_resume,
             analyze_resume_profile,
             create_resume_profile,
             get_launch_context,
+            open_release_page,
             get_workflow_status,
             start_workflow,
             stop_workflow

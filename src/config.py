@@ -305,7 +305,9 @@ def _default_config():
             "auth": {
                 "sender_email": "",
                 "app_password": "",
+                "app_password_configured": False,
             },
+            "attach_cover_letter": True,
             "contact_info": {
                 "phone": "",
                 "email": "",
@@ -316,11 +318,12 @@ def _default_config():
         },
         "app": {
             "run_at_startup": False,
-            "auto_run_on_launch": True,
+            "auto_run_on_launch": False,
             "start_minimized": False,
             "scan_only_mode": False,
             "startup_delay_seconds": 30,
             "theme": "ember-light",
+            "onboarding_completed": False,
         },
     }
 
@@ -361,6 +364,8 @@ def load_app_config():
         return config
 
     merged = _deep_merge(config, user_config)
+    if "onboarding_completed" not in user_config.get("app", {}):
+        merged["app"]["onboarding_completed"] = True
     if merged["scraper"].get("recent_job_window_days") in (3, 5):
         merged["scraper"]["recent_job_window_days"] = 2
     env_values = dotenv_values(ENV_FILE)

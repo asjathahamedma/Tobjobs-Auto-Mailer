@@ -7,6 +7,7 @@ export interface RunSummary {
   searched: number;
   filtered_out: number;
   matched: number;
+  match_rate: number;
   reviewed: number;
   applied: number;
   rejected: number;
@@ -133,6 +134,7 @@ export interface ResumeProfileDraftResult {
 export interface MailerAuthConfig {
   sender_email: string;
   app_password: string;
+  app_password_configured: boolean;
 }
 
 export interface AppConfig {
@@ -152,6 +154,7 @@ export interface AppConfig {
     your_name: string;
     default_resume_path: string;
     auth: MailerAuthConfig;
+    attach_cover_letter: boolean;
     contact_info: {
       phone: string;
       email: string;
@@ -167,6 +170,7 @@ export interface AppConfig {
     scan_only_mode: boolean;
     startup_delay_seconds: number;
     theme: string;
+    onboarding_completed: boolean;
   };
 }
 
@@ -201,6 +205,11 @@ export interface WorkflowStatus {
 
 export interface LaunchContext {
   startup: boolean;
+}
+
+export interface AccountStatus {
+  registered: boolean;
+  email: string;
 }
 
 export interface WorkflowEventEnvelope {

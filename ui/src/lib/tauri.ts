@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AppConfig,
+  AccountStatus,
   LaunchContext,
   ResumeImportResult,
   ResumeProfileDraftInput,
@@ -19,6 +20,22 @@ export async function fetchSnapshot(windowDays = 30) {
 
 export async function fetchConfig() {
   return invoke<AppConfig>("get_config");
+}
+
+export async function fetchAccountStatus() {
+  return invoke<AccountStatus>("get_account_status");
+}
+
+export async function registerAccount(email: string, password: string) {
+  return invoke<AccountStatus>("register_account", { email, password });
+}
+
+export async function loginAccount(email: string, password: string) {
+  return invoke<AccountStatus>("login_account", { email, password });
+}
+
+export async function openGmailAppPasswordPage() {
+  return invoke("open_gmail_app_password_page");
 }
 
 export async function saveConfig(config: AppConfig) {

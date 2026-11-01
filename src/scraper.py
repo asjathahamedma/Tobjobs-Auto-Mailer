@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from src import utils
 from src.config import (
@@ -38,6 +40,23 @@ HEADERS = {
         "Chrome/123.0.0.0 Safari/537.36"
     )
 }
+
+_HTTP_SESSION = requests.Session()
+_HTTP_SESSION.mount(
+    "https://",
+    HTTPAdapter(
+        max_retries=Retry(
+            total=3,
+            connect=3,
+            read=2,
+            status=3,
+            backoff_factor=0.5,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=frozenset({"GET"}),
+            respect_retry_after_header=True,
+        )
+    ),
+)
 
 _OCR_READER = None
 
@@ -96,7 +115,7 @@ def load_job_listing_page(category_url):
     job_details = []
 
     try:
-        response = requests.get(category_url, headers=HEADERS, timeout=20)
+        response = _HTTP_SESSION.get(category_url, headers=HEADERS, timeout=20)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -142,7 +161,7 @@ def load_job_listing_page(category_url):
 
 def fetch_job_page(job_url):
     """Downloads and parses a single TopJobs ad page."""
-    response = requests.get(job_url, headers=HEADERS, timeout=30)
+    response = _HTTP_SESSION.get(job_url, headers=HEADERS, timeout=30)
     response.raise_for_status()
     return BeautifulSoup(response.text, "html.parser")
 
@@ -191,7 +210,7 @@ def ocr_ad_images(image_urls):
     extracted_chunks = []
     for image_url in image_urls:
         try:
-            response = requests.get(image_url, headers=HEADERS, timeout=30)
+            response = _HTTP_SESSION.get(image_url, headers=HEADERS, timeout=30)
             response.raise_for_status()
         except requests.exceptions.RequestException as exc:
             logger.debug(f" -> Could not download ad image for OCR: {exc}")

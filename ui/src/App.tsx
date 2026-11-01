@@ -7,21 +7,27 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { JobsPage } from "@/pages/JobsPage";
 import { ProfilesPage } from "@/pages/ProfilesPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { WelcomePage } from "@/pages/WelcomePage";
+import { AccountPage } from "@/pages/AccountPage";
 import {
   analyzeResumeProfile,
   createResumeProfile,
   fetchConfig,
+  fetchAccountStatus,
   fetchResumeInventory,
   fetchSnapshot,
   getLaunchContext,
   getWorkflowStatus,
   listenWorkflowEvents,
+  loginAccount,
+  registerAccount,
   saveConfig,
   startWorkflow,
   stopWorkflow,
 } from "@/lib/tauri";
 import type {
   AppConfig,
+  AccountStatus,
   LaunchContext,
   PageKey,
   ResumeProfileDraftInput,
@@ -32,6 +38,7 @@ import type {
   WorkflowStatus,
 } from "@/lib/types";
 import { formatDateTime, summarizeWorkflowEvent } from "@/lib/utils";
+import { checkForAppUpdate, openLatestRelease, type AppUpdate } from "@/lib/updates";
 
 const PAGE_COPY: Record<PageKey, { title: string; subtitle: string }> = {
   dashboard: {
@@ -60,6 +67,8 @@ export default function App() {
   const [page, setPage] = useState<PageKey>("dashboard");
   const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
   const [config, setConfig] = useState<AppConfig | null>(null);
+  const [accountStatus, setAccountStatus] = useState<AccountStatus | null>(null);
+  const [authenticated, setAuthenticated] = useState(false);
   const [resumeInventory, setResumeInventory] = useState<ResumeInventoryItem[]>([]);
   const [workflowStatus, setWorkflowStatus] = useState<WorkflowStatus>({ running: false, pid: null });
   const [launchContext, setLaunchContext] = useState<LaunchContext>({ startup: false });
@@ -67,9 +76,13 @@ export default function App() {
   const [workflowProgress, setWorkflowProgress] = useState<WorkflowProgressState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [authenticating, setAuthenticating] = useState(false);
   const [analyzingProfile, setAnalyzingProfile] = useState(false);
   const [creatingProfile, setCreatingProfile] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [appUpdate, setAppUpdate] = useState<AppUpdate | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const autoStartAttempted = useRef(false);
@@ -86,12 +99,13 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const [snapshotData, configData, inventoryData, statusData, launchData] = await Promise.all([
+      const [snapshotData, configData, inventoryData, statusData, launchData, accountData] = await Promise.all([
         fetchSnapshot(30),
         fetchConfig(),
         fetchResumeInventory(),
         getWorkflowStatus(),
         getLaunchContext(),
+        fetchAccountStatus(),
       ]);
 
       startTransition(() => {
@@ -100,6 +114,7 @@ export default function App() {
         setResumeInventory(inventoryData);
         setWorkflowStatus(statusData);
         setLaunchContext(launchData);
+        setAccountStatus(accountData);
       });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -107,6 +122,39 @@ export default function App() {
       setLoading(false);
     }
   }, []);
+
+  const handleAuthenticate = useCallback(
+    async (mode: "register" | "login", email: string, password: string) => {
+      setAuthenticating(true);
+      setError(null);
+      try {
+        const account = mode === "register"
+          ? await registerAccount(email, password)
+          : await loginAccount(email, password);
+        setAccountStatus(account);
+        setAuthenticated(true);
+      } catch (authError) {
+        setError(authError instanceof Error ? authError.message : String(authError));
+      } finally {
+        setAuthenticating(false);
+      }
+    },
+    []
+  );
+
+  const handleSignOut = useCallback(async () => {
+    if (workflowStatus.running) {
+      try {
+        await stopWorkflow();
+        setWorkflowStatus({ running: false, pid: null });
+      } catch (stopError) {
+        setError(stopError instanceof Error ? stopError.message : String(stopError));
+        return;
+      }
+    }
+    setError(null);
+    setAuthenticated(false);
+  }, [workflowStatus.running]);
 
   const handleRefresh = useCallback(async () => {
     try {
@@ -137,6 +185,28 @@ export default function App() {
       setSaving(false);
     }
   }, [config]);
+
+  const runUpdateCheck = useCallback(async () => {
+    setUpdateError(null);
+    try {
+      setAppUpdate(await checkForAppUpdate());
+    } catch (checkError) {
+      setUpdateError(checkError instanceof Error ? checkError.message : String(checkError));
+    }
+  }, []);
+
+  const handleCompleteOnboarding = useCallback(async (nextConfig: AppConfig) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await saveConfig(nextConfig);
+      setConfig(await fetchConfig());
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : String(saveError));
+    } finally {
+      setSaving(false);
+    }
+  }, []);
 
   const handleStart = useCallback(
     async (startup = false) => {
@@ -227,6 +297,10 @@ export default function App() {
   }, [refreshWorkspace]);
 
   useEffect(() => {
+    void runUpdateCheck();
+  }, [runUpdateCheck]);
+
+  useEffect(() => {
     let disposed = false;
 
     const subscribe = async () => {
@@ -314,7 +388,14 @@ export default function App() {
   }, [refreshSnapshotOnly]);
 
   useEffect(() => {
-    if (!config || !launchContext || autoStartAttempted.current || workflowStatus.running) {
+    if (
+      !config ||
+      !authenticated ||
+      !config.app.onboarding_completed ||
+      !launchContext ||
+      autoStartAttempted.current ||
+      workflowStatus.running
+    ) {
       return;
     }
 
@@ -329,16 +410,21 @@ export default function App() {
 
     autoStartAttempted.current = true;
     void handleStart(launchContext.startup);
-  }, [config, handleStart, launchContext, workflowStatus.running]);
+  }, [authenticated, config, handleStart, launchContext, workflowStatus.running]);
 
   useEffect(() => {
-    if (!config?.app.start_minimized || minimizeAttempted.current) {
+    if (
+      !authenticated ||
+      !config?.app.onboarding_completed ||
+      !config.app.start_minimized ||
+      minimizeAttempted.current
+    ) {
       return;
     }
 
     minimizeAttempted.current = true;
     void getCurrentWindow().minimize();
-  }, [config]);
+  }, [authenticated, config]);
 
   const pageContent = useMemo(() => {
     switch (page) {
@@ -367,11 +453,18 @@ export default function App() {
           />
         );
       case "settings":
-        return <SettingsPage config={config} onConfigChange={(nextConfig) => setConfig(nextConfig)} />;
+        return (
+          <SettingsPage
+            config={config}
+            accountEmail={accountStatus?.email ?? ""}
+            onSignOut={() => void handleSignOut()}
+            onConfigChange={(nextConfig) => setConfig(nextConfig)}
+          />
+        );
       default:
         return null;
     }
-  }, [analyzingProfile, config, creatingProfile, handleAnalyzeResumeProfile, handleCreateResumeProfile, liveLogs, page, resumeInventory, snapshot, workflowProgress, workflowStatus.running]);
+  }, [accountStatus?.email, analyzingProfile, config, creatingProfile, handleAnalyzeResumeProfile, handleCreateResumeProfile, handleSignOut, liveLogs, page, resumeInventory, snapshot, workflowProgress, workflowStatus.running]);
 
   const statusLabel = useMemo(() => {
     if (loading || isPending) return "Loading workspace data...";
@@ -392,6 +485,51 @@ export default function App() {
 
   const pageCopy = PAGE_COPY[page];
 
+  if (loading) {
+    return (
+      <main className="flex h-screen items-center justify-center bg-horizon-background px-5">
+        <div className="rounded-2xl border border-horizon-border bg-white px-6 py-5 text-sm text-horizon-muted shadow-horizon">
+          Loading your workspace...
+        </div>
+      </main>
+    );
+  }
+
+  if (!accountStatus) {
+    return (
+      <main className="flex h-screen flex-col items-center justify-center gap-4 bg-horizon-background px-5 text-center">
+        <p role="alert" className="max-w-lg text-sm text-horizon-danger">
+          {error || "Could not load the local account. Your workspace was not opened."}
+        </p>
+        <button type="button" className="action-button action-button-primary" onClick={() => void refreshWorkspace()}>
+          Retry
+        </button>
+      </main>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <AccountPage
+        account={accountStatus}
+        busy={authenticating}
+        error={error}
+        onAuthenticate={handleAuthenticate}
+      />
+    );
+  }
+
+  if (config && !config.app.onboarding_completed) {
+    return (
+      <WelcomePage
+        config={config}
+        saving={saving}
+        error={error}
+        onComplete={handleCompleteOnboarding}
+      />
+    );
+  }
+
   return (
     <AppShell
       page={page}
@@ -408,6 +546,44 @@ export default function App() {
       onStop={() => void handleStop()}
     >
       <div className="space-y-5">
+        {appUpdate && !updateDismissed ? (
+          <section className="flex flex-col gap-4 rounded-3xl border border-brand-600/20 bg-brand-600/5 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-bold text-horizon-text">TopJobs Mailer {appUpdate.version} is available</p>
+              <p className="mt-1 text-sm text-horizon-muted">
+                Download the latest Windows installer from the GitHub release page to update this app.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                className="action-button action-button-primary"
+                onClick={() => {
+                  void openLatestRelease().catch((openError) =>
+                    setError(openError instanceof Error ? openError.message : String(openError))
+                  );
+                }}
+              >
+                View update
+              </button>
+              <button
+                type="button"
+                className="action-button action-button-secondary"
+                onClick={() => setUpdateDismissed(true)}
+              >
+                Later
+              </button>
+            </div>
+          </section>
+        ) : null}
+        {updateError ? (
+          <div className="flex flex-col gap-3 rounded-2xl border border-horizon-border bg-white px-4 py-3 text-sm text-horizon-muted sm:flex-row sm:items-center sm:justify-between">
+            <span>Could not check for app updates: {updateError}</span>
+            <button type="button" className="action-button action-button-secondary" onClick={() => void runUpdateCheck()}>
+              Try again
+            </button>
+          </div>
+        ) : null}
         {error ? (
           <div className="rounded-3xl border border-horizon-danger/20 bg-horizon-danger/10 px-5 py-4 text-sm text-horizon-danger">
             {error}

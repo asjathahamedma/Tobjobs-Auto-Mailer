@@ -1,0 +1,67 @@
+name: Build and publish Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify release tag matches app version
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$packageVersion" -ne $env:GITHUB_REF_NAME) {
+            throw "Release tag $env:GITHUB_REF_NAME does not match package version $packageVersion."
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install bundled Python runtime dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+      - name: Validate application
+        shell: pwsh
+        run: |
+          npm run typecheck
+          .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+
+      - name: Build Windows installer
+        run: npm run tauri:build
+
+      - name: Publish installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: TopJobs Auto Mailer ${{ github.ref_name }}
+          generate_release_notes: true
+          make_latest: true
+          files: src-tauri/target/release/bundle/nsis/*-setup.exe
