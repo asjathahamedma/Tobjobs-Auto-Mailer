@@ -111,9 +111,20 @@ fn locate_install_dir(resource_root: &Path) -> PathBuf {
 
 fn resolve_python(resource_root: &Path) -> String {
     let portable_python_dir = resource_root.join(".python");
-    let portable_python = portable_python_dir.join("python.exe");
+    let portable_python = portable_python_dir
+        .join("runtime")
+        .join("python.exe");
     if portable_python.exists() {
         return portable_python.to_string_lossy().to_string();
+    }
+
+    if let Ok(entries) = fs::read_dir(portable_python_dir.join("runtime")) {
+        for entry in entries.flatten() {
+            let candidate = entry.path().join("python.exe");
+            if candidate.exists() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
     }
 
     if let Ok(entries) = fs::read_dir(&portable_python_dir) {
@@ -143,13 +154,20 @@ fn configure_python_command(command: &mut Command) -> Result<(), String> {
     fs::create_dir_all(app_home.join("logs")).map_err(|error| error.to_string())?;
     fs::create_dir_all(app_home.join("resumes")).map_err(|error| error.to_string())?;
 
-    let existing_python_path = std::env::var("PYTHONPATH").ok();
-    let merged_python_path = match existing_python_path {
-        Some(value) if !value.trim().is_empty() => {
-            format!("{};{}", resource_root.to_string_lossy(), value)
+    let mut python_paths = vec![
+        resource_root.to_string_lossy().to_string(),
+        resource_root
+            .join(".python")
+            .join("site-packages")
+            .to_string_lossy()
+            .to_string(),
+    ];
+    if let Ok(existing_python_path) = std::env::var("PYTHONPATH") {
+        if !existing_python_path.trim().is_empty() {
+            python_paths.push(existing_python_path);
         }
-        _ => resource_root.to_string_lossy().to_string(),
-    };
+    }
+    let merged_python_path = python_paths.join(";");
 
     command.current_dir(&app_home);
     command.env("TOPJOBS_RESOURCE_DIR", &resource_root);

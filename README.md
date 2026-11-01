@@ -18,7 +18,7 @@ Normal users only need the Windows setup file. They do not need to download the 
 
 2. Download the latest setup file:
 
-`TopJobs Auto Mailer_2.3.1_x64-setup.exe`
+`TopJobs Auto Mailer_2.3.2_x64-setup.exe`
 
 3. Double-click the setup file and install the app.
 
@@ -95,9 +95,9 @@ Install dependencies:
 
 ```powershell
 npm install
-uv python install 3.12 --install-dir .python
-$python = Get-ChildItem .python -Filter python.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
-uv pip install --python $python -r requirements.txt
+uv python install 3.12 --install-dir .python/runtime
+$python = Get-ChildItem .python/runtime -Filter python.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
+uv pip install --python $python --target .python/site-packages -r requirements.txt
 ```
 
 Run the desktop app in development:
@@ -115,15 +115,16 @@ Build the production installer:
 The installer is generated at:
 
 ```text
-src-tauri/target/release/bundle/nsis/TopJobs Auto Mailer_2.3.1_x64-setup.exe
+src-tauri/target/release/bundle/nsis/TopJobs Auto Mailer_2.3.2_x64-setup.exe
 ```
 
 ## Manual Windows Build
 
 ```powershell
 npm ci
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+uv python install 3.12 --install-dir .python/runtime
+$python = Get-ChildItem .python/runtime -Filter python.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
+uv pip install --python $python --target .python/site-packages -r requirements.txt
 npm run tauri:build
 ```
 

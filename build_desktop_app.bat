@@ -18,16 +18,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-call uv python install 3.12 --install-dir .python
+call uv python install 3.12 --install-dir .python\runtime
 if errorlevel 1 exit /b 1
 
-for /f "delims=" %%P in ('where /r ".python" python.exe') do if not defined TOPJOBS_PYTHON set "TOPJOBS_PYTHON=%%P"
-if not defined TOPJOBS_PYTHON (
+for /f "delims=" %%P in ('where /r ".python\runtime" python.exe') do if not defined TOPJOBS_BASE_PYTHON set "TOPJOBS_BASE_PYTHON=%%P"
+if not defined TOPJOBS_BASE_PYTHON (
     echo Could not find python.exe in the portable Python runtime.
     exit /b 1
 )
 
-call uv pip install --python "%TOPJOBS_PYTHON%" -r requirements.txt
+set "TOPJOBS_PYTHON=%TOPJOBS_BASE_PYTHON%"
+call uv pip install --python "%TOPJOBS_PYTHON%" --target .python\site-packages -r requirements.txt
 if errorlevel 1 exit /b 1
 
 call run_npm.bat install
