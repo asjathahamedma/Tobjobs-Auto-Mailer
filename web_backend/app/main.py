@@ -7,6 +7,7 @@ import ssl
 import uuid
 from datetime import datetime, timedelta, timezone
 from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
@@ -17,6 +18,7 @@ from urllib.parse import quote
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pypdf import PdfReader
 
 from src.web_engine import run_topjobs_search
@@ -70,6 +72,20 @@ def _one(rows: Any, message: str):
 
 def _user_filter(user: AuthenticatedUser):
     return {"user_id": f"eq.{user.id}"}
+
+
+def _extract_resume_text(content: bytes) -> str:
+    try:
+        reader = PdfReader(BytesIO(content))
+        extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Could not read text from this PDF.") from exc
+    if not extracted.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="This PDF has no extractable text. Scanned-image resumes are not supported yet.",
+        )
+    return extracted
 
 
 def _read_user_settings(db: SupabaseRest, user: AuthenticatedUser) -> dict[str, Any]:
@@ -509,14 +525,7 @@ async def upload_resume(
         raise HTTPException(status_code=413, detail="Resume files must be 10 MB or smaller.")
     if not content.startswith(b"%PDF-"):
         raise HTTPException(status_code=400, detail="The uploaded file is not a valid PDF.")
-    try:
-        reader = PdfReader(BytesIO(content))
-        extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Could not read text from this PDF.") from exc
-    if not extracted.strip():
-        raise HTTPException(status_code=422, detail="This PDF has no extractable text. Scanned-image resumes are not supported yet.")
-
+    extracted = _extract_resume_text(content)
     profile = build_resume_profile(extracted, filename)
     resume_id = str(uuid.uuid4())
     storage_path = f"{user.id}/{resume_id}-{filename}"
@@ -537,6 +546,78 @@ async def upload_resume(
     }
     rows = db.request("POST", "resumes", body=payload, prefer="return=representation")
     return _one(rows, "Could not save resume profile.")
+
+
+@app.get("/api/resumes/{resume_id}/file")
+def preview_resume(
+    resume_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    rows = db.request(
+        "GET",
+        "resumes",
+        params={
+            **_user_filter(user),
+            "id": f"eq.{resume_id}",
+            "select": "storage_path,file_name",
+        },
+    )
+    resume = _one(rows, "Resume profile not found.")
+    content = db.storage_request(
+        "GET",
+        f"object/private-resumes/{quote(resume['storage_path'], safe='/')}",
+    ).content
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "_", resume.get("file_name") or "resume.pdf")
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.post("/api/resumes/{resume_id}/extract-keywords")
+def extract_resume_keywords(
+    resume_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    rows = db.request(
+        "GET",
+        "resumes",
+        params={
+            **_user_filter(user),
+            "id": f"eq.{resume_id}",
+            "select": "storage_path,file_name",
+        },
+    )
+    resume = _one(rows, "Resume profile not found.")
+    content = db.storage_request(
+        "GET",
+        f"object/private-resumes/{quote(resume['storage_path'], safe='/')}",
+    ).content
+    extracted = _extract_resume_text(content)
+    profile = build_resume_profile(extracted, resume.get("file_name") or "resume.pdf")
+    updated = db.request(
+        "PATCH",
+        "resumes",
+        params={
+            **_user_filter(user),
+            "id": f"eq.{resume_id}",
+            "select": "id,file_name,label,summary,title_keywords,description_keywords,created_at",
+        },
+        body={
+            "title_keywords": profile["title_keywords"],
+            "description_keywords": profile["description_keywords"],
+            "extracted_text_length": len(extracted),
+        },
+        prefer="return=representation",
+    )
+    return _one(updated, "Resume profile not found.")
 
 
 @app.patch("/api/resumes/{resume_id}")

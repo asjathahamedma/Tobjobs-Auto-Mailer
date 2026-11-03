@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from bs4 import BeautifulSoup
 from fastapi import HTTPException
@@ -9,9 +9,10 @@ from fastapi import HTTPException
 from src import scraper
 from src.resume_profiles import build_resume_profile
 from src.web_engine import run_topjobs_search
-from web_backend.app.auth import require_user
+from web_backend.app.auth import AuthenticatedUser, require_user
 from web_backend.app.content import generate_application_content
-from web_backend.app.schemas import SettingsUpdate
+from web_backend.app.schemas import ApprovedSend, SettingsUpdate
+from web_backend.app import main as api_main
 
 
 class WebFeatureTests(unittest.TestCase):
@@ -23,6 +24,84 @@ class WebFeatureTests(unittest.TestCase):
         self.assertIn("react", [keyword.lower() for keyword in profile["title_keywords"] + profile["description_keywords"]])
         self.assertTrue(profile["label"])
         self.assertTrue(profile["summary"])
+
+    def test_resume_profile_extracts_a_broader_ranked_keyword_set(self):
+        profile = build_resume_profile(
+            "Data engineer: Python SQL PostgreSQL AWS Docker Kubernetes Airflow Spark "
+            "Snowflake BigQuery ETL data modeling data warehouse Git Linux Terraform "
+            "Tableau pandas numpy Excel Power BI data analysis machine learning deep learning "
+            "TensorFlow PyTorch scikit learn data visualization statistics computer vision NLP "
+            "Python Python",
+            "data_resume.pdf",
+        )
+        keywords = profile["title_keywords"] + profile["description_keywords"]
+        self.assertGreater(len(keywords), 22)
+        self.assertIn("data engineer", profile["title_keywords"])
+        self.assertIn("python", profile["description_keywords"])
+        self.assertLess(profile["description_keywords"].index("python"), profile["description_keywords"].index("sql"))
+        self.assertLessEqual(len(profile["title_keywords"]), 30)
+        self.assertLessEqual(len(profile["description_keywords"]), 60)
+
+    def test_resume_preview_is_private_and_scoped_to_the_current_user(self):
+        class FakeDatabase:
+            def request(self, method, table, *, params=None, **kwargs):
+                self.params = params
+                return [{"storage_path": "user-1/resume.pdf", "file_name": "resume.pdf"}]
+
+            def storage_request(self, method, path):
+                self.storage_request_args = (method, path)
+                return SimpleNamespace(content=b"%PDF-1.4 private resume")
+
+        database = FakeDatabase()
+        response = api_main.preview_resume(
+            "resume-1",
+            AuthenticatedUser("user-1", "user@example.com", "access-token"),
+            database,
+        )
+        self.assertEqual(database.params["user_id"], "eq.user-1")
+        self.assertEqual(database.storage_request_args[0], "GET")
+        self.assertEqual(response.body, b"%PDF-1.4 private resume")
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertEqual(response.headers["content-type"], "application/pdf")
+        self.assertTrue(response.headers["content-disposition"].startswith("inline;"))
+
+    def test_resume_keyword_reextraction_updates_only_keyword_fields(self):
+        existing_profile = {
+            "id": "resume-1",
+            "file_name": "resume.pdf",
+            "label": "My edited profile",
+            "summary": "My edited summary",
+            "title_keywords": ["Data Engineer"],
+            "description_keywords": ["Python"],
+        }
+
+        class FakeDatabase:
+            def request(self, method, table, *, params=None, body=None, **kwargs):
+                if method == "GET":
+                    self.params = params
+                    return [{"storage_path": "user-1/resume.pdf", "file_name": "resume.pdf"}]
+                self.body = body
+                return [existing_profile]
+
+            def storage_request(self, method, path):
+                return SimpleNamespace(content=b"%PDF-1.4 private resume")
+
+        database = FakeDatabase()
+        with patch.object(api_main, "_extract_resume_text", return_value="Data engineer with Python and AWS"):
+            updated = api_main.extract_resume_keywords(
+                "resume-1",
+                AuthenticatedUser("user-1", "user@example.com", "access-token"),
+                database,
+            )
+        expected = build_resume_profile("Data engineer with Python and AWS", "resume.pdf")
+        self.assertEqual(database.params["user_id"], "eq.user-1")
+        self.assertEqual(database.body["title_keywords"], expected["title_keywords"])
+        self.assertEqual(database.body["description_keywords"], expected["description_keywords"])
+        self.assertGreater(database.body["extracted_text_length"], 0)
+        self.assertNotIn("label", database.body)
+        self.assertNotIn("summary", database.body)
+        self.assertEqual(updated["label"], "My edited profile")
+        self.assertEqual(updated["summary"], "My edited summary")
 
     def test_settings_only_allow_topjobs_applicant_categories(self):
         settings = SettingsUpdate(category_urls=[
@@ -124,6 +203,67 @@ class WebFeatureTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as error:
                 require_user(None)
         self.assertEqual(error.exception.status_code, 401)
+
+    def test_approved_email_sends_resume_attachment_and_updates_status(self):
+        application = {
+            "id": "application-1",
+            "job_id": "job-1",
+            "status": "awaiting_review",
+            "generated_subject": "Application",
+            "generated_email": "Please review my application.",
+            "job_listings": {
+                "title": "Developer",
+                "company_email": "jobs@example.com",
+                "source_url": "https://example.com/job",
+            },
+        }
+
+        class FakeDatabase:
+            def request(self, method, table, *, params=None, **kwargs):
+                if method == "GET" and table == "applications":
+                    return [application]
+                if method == "GET" and table == "job_matches":
+                    return [{"resumes": {"storage_path": "user-1/resume.pdf", "file_name": "resume.pdf"}}]
+                if method == "GET" and table == "mailer_credentials":
+                    return [{"sender_email": "applicant@example.com", "encrypted_app_password": "encrypted"}]
+                if method == "GET" and table == "user_settings":
+                    return []
+                if method == "PATCH" and table == "applications":
+                    if params["status"] == "eq.sending":
+                        return [{"id": "application-1", "status": "applied"}]
+                    return [{"id": "application-1"}]
+                raise AssertionError(f"Unexpected database request: {method} {table}")
+
+            def storage_request(self, method, path):
+                if method != "GET" or "private-resumes/user-1/resume.pdf" not in path:
+                    raise AssertionError(f"Unexpected storage request: {method} {path}")
+                return SimpleNamespace(content=b"%PDF-1.4 test resume")
+
+        database = FakeDatabase()
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        smtp.sendmail.return_value = {}
+
+        with (
+            patch.object(api_main.smtplib, "SMTP_SSL", return_value=smtp) as smtp_ssl,
+            patch.object(
+                api_main,
+                "_require_encryption",
+                return_value=SimpleNamespace(decrypt=lambda _: b"gmail-app-password"),
+            ),
+        ):
+            result = api_main.send_approved_email(
+                "application-1",
+                ApprovedSend(approved=True),
+                AuthenticatedUser("user-1", "applicant@example.com", "access-token"),
+                database,
+            )
+
+        self.assertEqual(result["status"], "applied")
+        smtp_ssl.assert_called_once()
+        smtp.login.assert_called_once_with("applicant@example.com", "gmail-app-password")
+        smtp.sendmail.assert_called_once()
+        self.assertIn("Content-Type: application/pdf", smtp.sendmail.call_args.args[2])
 
 
 if __name__ == "__main__":

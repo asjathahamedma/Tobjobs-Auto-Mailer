@@ -1,9 +1,9 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
-import { BookOpen, Check, CircleAlert, FileUp, LoaderCircle, Save } from "lucide-react";
+import { BookOpen, Check, CircleAlert, Eye, FileUp, LoaderCircle, Save, Sparkles, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { api, jsonBody } from "@/lib/api";
+import { api, apiBlob, jsonBody } from "@/lib/api";
 
 type Settings = {
   display_name: string;
@@ -45,6 +45,13 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview.url);
+    };
+  }, [preview]);
 
   const refresh = useCallback(async () => {
     try {
@@ -83,22 +90,63 @@ export default function SettingsPage() {
   }
 
   async function uploadResume(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const input = event.currentTarget;
+    const files = Array.from(input.files || []);
+    if (!files.length) return;
     setBusy("resume");
     setError("");
+    const uploaded: Resume[] = [];
+    const failures: string[] = [];
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const resume = await api<Resume>("/api/resumes", { method: "POST", body: form });
-      setResumes((current) => [resume, ...current]);
-      setField("selected_resume_id", resume.id);
-      setNotice(`Uploaded ${resume.file_name}. Detected keywords: ${[...resume.title_keywords, ...resume.description_keywords].slice(0, 8).join(", ") || "none detected"}.`);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not upload resume.");
+      for (const file of files) {
+        const form = new FormData();
+        form.append("file", file);
+        try {
+          uploaded.push(await api<Resume>("/api/resumes", { method: "POST", body: form }));
+        } catch (reason) {
+          failures.push(`${file.name}: ${reason instanceof Error ? reason.message : "Could not upload this file."}`);
+        }
+      }
+      if (uploaded.length) {
+        setResumes((current) => [...uploaded, ...current]);
+        setSettings((current) => ({
+          ...current,
+          selected_resume_id: current.selected_resume_id || uploaded[0].id,
+        }));
+        setNotice(`Uploaded ${uploaded.length} resume${uploaded.length === 1 ? "" : "s"}.`);
+      }
+      if (failures.length) setError(`Could not upload ${failures.join(" ")}`);
+      if (!uploaded.length && !failures.length) setError("No resumes were uploaded.");
     } finally {
       setBusy("");
-      event.target.value = "";
+      input.value = "";
+    }
+  }
+
+  async function previewResume(id: string) {
+    setBusy(`preview:${id}`);
+    setError("");
+    try {
+      const blob = await apiBlob(`/api/resumes/${id}/file`);
+      setPreview({ id, url: URL.createObjectURL(blob) });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not preview this resume.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function extractKeywords(id: string) {
+    setBusy(`keywords:${id}`);
+    setError("");
+    try {
+      const updated = await api<Resume>(`/api/resumes/${id}/extract-keywords`, { method: "POST" });
+      setResumes((current) => current.map((resume) => resume.id === id ? updated : resume));
+      setNotice(`Extracted ${updated.title_keywords.length + updated.description_keywords.length} keywords from ${updated.file_name}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not extract resume keywords.");
+    } finally {
+      setBusy("");
     }
   }
 
@@ -144,16 +192,30 @@ export default function SettingsPage() {
       {notice && <div className="notice success"><Check size={18} />{notice}</div>}
       <div className="settings-layout">
         <section className="panel settings-section"><div className="section-heading"><div><h2>Resume profiles</h2><p className="muted">Upload a text-based PDF (up to 10 MB). Scanned images are not supported yet.</p></div></div>
-          <label className="upload-zone"><FileUp size={22} /><span>{busy === "resume" ? "Uploading and analyzing…" : "Choose a PDF resume"}</span><input type="file" accept="application/pdf,.pdf" onChange={uploadResume} disabled={busy === "resume"} /></label>
+          <label className="upload-zone"><FileUp size={22} /><span>{busy === "resume" ? "Uploading and analyzing…" : "Choose one or more PDF resumes"}</span><input type="file" accept="application/pdf,.pdf" multiple onChange={uploadResume} disabled={busy === "resume"} /></label>
           {resumes.length > 0 && <label>Profile used for matching<select value={settings.selected_resume_id || ""} onChange={(event) => setField("selected_resume_id", event.target.value || null)}>{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.label}</option>)}</select></label>}
           {resumes.map((resume) => <div className="resume-profile-editor" key={resume.id}>
             <div className="resume-row"><FileUp size={17} /><div><strong>{resume.label}</strong><small>{resume.file_name}</small></div><span>{busy === `profile:${resume.id}` ? "Saving…" : "Edit inferred profile"}</span></div>
+            <div className="resume-actions">
+              <button className="button secondary" type="button" onClick={() => void previewResume(resume.id)} disabled={busy === `preview:${resume.id}`}>
+                {busy === `preview:${resume.id}` ? <LoaderCircle className="spin" size={16} /> : <Eye size={16} />}Preview
+              </button>
+              <button className="button secondary" type="button" onClick={() => void extractKeywords(resume.id)} disabled={busy === `keywords:${resume.id}`}>
+                {busy === `keywords:${resume.id}` ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}Extract keywords
+              </button>
+            </div>
             <label>Profile name<input defaultValue={resume.label} onBlur={(event) => { if (event.target.value !== resume.label) void saveResume(resume.id, { label: event.target.value }); }} /></label>
             <label>Profile summary<textarea rows={2} defaultValue={resume.summary} onBlur={(event) => { if (event.target.value !== resume.summary) void saveResume(resume.id, { summary: event.target.value }); }} /></label>
             <label>Title keywords <small>Comma-separated; used to compare job titles</small><input defaultValue={resume.title_keywords.join(", ")} onBlur={(event) => { if (event.target.value !== resume.title_keywords.join(", ")) void saveResume(resume.id, { title_keywords: split(event.target.value) }); }} /></label>
             <label>Description keywords <small>Comma-separated; used to compare advert text</small><input defaultValue={resume.description_keywords.join(", ")} onBlur={(event) => { if (event.target.value !== resume.description_keywords.join(", ")) void saveResume(resume.id, { description_keywords: split(event.target.value) }); }} /></label>
           </div>)}
         </section>
+        {preview && <div className="resume-preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreview(null); }}>
+          <section className="resume-preview-dialog" role="dialog" aria-modal="true" aria-label="Resume preview">
+            <div className="resume-preview-heading"><h2>{resumes.find((resume) => resume.id === preview.id)?.file_name || "Resume preview"}</h2><button className="button secondary" type="button" onClick={() => setPreview(null)} aria-label="Close resume preview"><X size={17} /></button></div>
+            <iframe title="Private resume PDF preview" src={preview.url} />
+          </section>
+        </div>}
         <section className="panel settings-section"><h2>Contact details</h2><p className="muted">Used to prepare your professional application drafts.</p><div className="form-grid">
           <label>Display name<input value={settings.display_name} onChange={(event) => setField("display_name", event.target.value)} /></label>
           <label>Name for applications<input value={settings.your_name} onChange={(event) => setField("your_name", event.target.value)} /></label>

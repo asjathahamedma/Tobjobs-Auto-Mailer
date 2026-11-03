@@ -5,7 +5,7 @@ A web-only job-search workspace for TopJobs.lk. It uses Next.js for the website,
 ## What is included
 
 - Email/password registration and sign-in using Supabase Auth; no Google OAuth.
-- User-scoped settings, private PDF resume storage, and RLS-protected job, search, and application records.
+- User-scoped settings, multiple private PDF resume profiles with authenticated preview and keyword extraction, and RLS-protected job, search, and application records.
 - TopJobs.lk category and advert scraping with existing weighted keyword matching.
 - Dashboard with recent runs, matched jobs, and a match rate based on jobs reviewed in the most recent 1,000 runs. A fit score is raw points, not a hiring probability.
 - Editable email and cover-letter drafts; the resume is attached only after checking the explicit approval box and choosing **Send approved email**.
