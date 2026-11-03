@@ -1,11 +1,10 @@
 import { createClient } from "@/lib/supabase/browser";
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
+const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "");
+const apiBase =
+  configuredApiBase || (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  if (!apiBase) {
-    throw new Error("The API URL is not configured. Set NEXT_PUBLIC_API_BASE_URL.");
-  }
   const supabase = createClient();
   const { data, error } = await supabase.auth.getSession();
   if (error || !data.session) {
@@ -16,14 +15,25 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}${path}`, {
+      ...init,
+      headers,
+      cache: "no-store",
+    });
+  } catch (reason) {
+    if (reason instanceof TypeError) {
+      throw new Error("Could not reach the API. Check the backend service and API routing.");
+    }
+    throw reason;
+  }
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(payload?.detail || `Request failed (${response.status}).`);
+  }
+  if (payload === null) {
+    throw new Error("The API returned an invalid response.");
   }
   return payload as T;
 }

@@ -1,9 +1,11 @@
+import asyncio
 import logging
+import os
 import re
 import smtplib
 import ssl
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email import encoders
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -30,10 +32,16 @@ from web_backend.app.schemas import (
     SettingsUpdate,
 )
 from web_backend.app.settings import get_settings
+from web_backend.app.search_queue import SearchJob, enqueue_search_job
 from web_backend.app.supabase_rest import SupabaseRest
 from src.resume_profiles import build_resume_profile
 
 logger = logging.getLogger("topjobs_web_api")
+
+
+class SearchFailedPermanently(Exception):
+    pass
+
 
 app = FastAPI(title="TopJobs Auto Mailer API", version="1.0.0")
 app.add_middleware(
@@ -130,13 +138,37 @@ def _add_run_event(db: SupabaseRest, user: AuthenticatedUser, run_id: str, level
     )
 
 
-def _execute_search(user_id: str, access_token: str, run_id: str, requested_resume_id: str | None):
-    user = AuthenticatedUser(id=user_id, email="", access_token=access_token)
-    db = SupabaseRest(access_token, user_id)
+def _execute_search(
+    user_id: str,
+    run_id: str,
+    requested_resume_id: str | None,
+    *,
+    access_token: str | None = None,
+    service_role: bool = False,
+    delivery_attempt: int = 1,
+    max_attempts: int = 1,
+):
+    settings = get_settings()
+    user = AuthenticatedUser(id=user_id, email="", access_token=access_token or "")
+    if service_role:
+        db = SupabaseRest(settings.supabase_service_role_key, user_id, service_role=True)
+    else:
+        if not access_token:
+            raise ValueError("A user access token is required for a local search.")
+        db = SupabaseRest(access_token, user_id)
     started_at = datetime.now(timezone.utc).isoformat()
     try:
+        run_rows = db.request(
+            "GET",
+            "search_runs",
+            params={"id": f"eq.{run_id}", **_user_filter(user), "select": "status"},
+        )
+        run = _one(run_rows, "Search run not found.")
+        if run["status"] in {"completed", "partially_completed", "failed", "cancelled"}:
+            return
+
         listing_db = SupabaseRest(
-            get_settings().supabase_service_role_key,
+            settings.supabase_service_role_key,
             service_role=True,
         )
         db.request(
@@ -297,25 +329,40 @@ def _execute_search(user_id: str, access_token: str, run_id: str, requested_resu
     except Exception as exc:
         logger.exception("Search run %s failed", run_id)
         try:
+            is_final_attempt = delivery_attempt >= max_attempts
             db.request(
                 "PATCH",
                 "search_runs",
                 params={"id": f"eq.{run_id}", **_user_filter(user)},
                 body={
-                    "status": "failed",
-                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "failed" if is_final_attempt else "queued",
+                    "completed_at": datetime.now(timezone.utc).isoformat() if is_final_attempt else None,
                     "error_summary": str(exc)[:1000],
                     "progress": {
-                        "stage": "failed",
-                        "percent": 100,
-                        "detail": "Search failed. Previously saved results were retained.",
+                        "stage": "failed" if is_final_attempt else "retrying",
+                        "percent": 100 if is_final_attempt else 0,
+                        "detail": (
+                            "Search failed after repeated attempts. Previously saved results were retained."
+                            if is_final_attempt
+                            else "A temporary error interrupted this attempt. The search will be retried."
+                        ),
                     },
                 },
                 prefer="return=minimal",
             )
-            _add_run_event(db, user, run_id, "error", f"Search failed: {type(exc).__name__}.")
+            _add_run_event(
+                db,
+                user,
+                run_id,
+                "error" if is_final_attempt else "warning",
+                f"Search attempt {delivery_attempt} failed: {type(exc).__name__}.",
+            )
         except Exception:
             logger.exception("Could not save failed search state for run %s", run_id)
+            raise
+        if is_final_attempt:
+            raise SearchFailedPermanently(str(exc)) from exc
+        raise
 
 
 @app.get("/health")
@@ -549,6 +596,11 @@ def create_search_run(
     user: Annotated[AuthenticatedUser, Depends(require_user)],
     db: Annotated[SupabaseRest, Depends(supabase_for_user)],
 ):
+    if os.getenv("VERCEL_ENV") == "preview":
+        raise HTTPException(
+            status_code=503,
+            detail="Search runs are enabled on the production deployment only.",
+        )
     settings = {**_settings_defaults(), **_read_user_settings(db, user)}
     resume_id = payload.resume_id or settings.get("selected_resume_id")
     if resume_id and not db.request(
@@ -573,7 +625,7 @@ def create_search_run(
             "limit": 5,
         },
     )
-    stale_before = datetime.now(timezone.utc).timestamp() - 10 * 60
+    stale_before = (datetime.now(timezone.utc) - timedelta(days=8)).timestamp()
     still_active = []
     for active_run in active_runs:
         try:
@@ -618,7 +670,47 @@ def create_search_run(
         prefer="return=representation",
     )
     run = _one(rows, "Could not create search run.")
-    background_tasks.add_task(_execute_search, user.id, user.access_token, run["id"], payload.resume_id)
+    if get_settings().search_queue_backend == "vercel":
+        try:
+            asyncio.run(
+                enqueue_search_job(
+                    get_settings().vercel_queue_region,
+                    SearchJob(user_id=user.id, run_id=run["id"], resume_id=resume_id),
+                )
+            )
+        except Exception as exc:
+            logger.exception("Could not enqueue search run %s", run["id"])
+            try:
+                db.request(
+                    "PATCH",
+                    "search_runs",
+                    params={"id": f"eq.{run['id']}", **_user_filter(user)},
+                    body={
+                        "status": "failed",
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "error_summary": "The search queue is unavailable. Please try again.",
+                        "progress": {
+                            "stage": "failed",
+                            "percent": 100,
+                            "detail": "The search could not be queued. Please try again.",
+                        },
+                    },
+                    prefer="return=minimal",
+                )
+            except Exception:
+                logger.exception("Could not record queue failure for search run %s", run["id"])
+            raise HTTPException(
+                status_code=503,
+                detail="The search queue is unavailable. Please try again.",
+            ) from exc
+    else:
+        background_tasks.add_task(
+            _execute_search,
+            user.id,
+            run["id"],
+            resume_id,
+            access_token=user.access_token,
+        )
     return run
 
 

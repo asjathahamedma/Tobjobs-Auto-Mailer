@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -11,6 +12,8 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     app_credentials_encryption_key: str = ""
     web_allowed_origins: str = "http://localhost:3000"
+    search_queue_backend: Literal["local", "vercel"] = "local"
+    vercel_queue_region: str = "iad1"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

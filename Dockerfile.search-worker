@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+COPY web_backend/requirements.txt /app/web_backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/web_backend/requirements.txt
+
+COPY src /app/src
+COPY web_backend /app/web_backend
+
+CMD ["python", "-m", "web_backend.app.search_worker"]

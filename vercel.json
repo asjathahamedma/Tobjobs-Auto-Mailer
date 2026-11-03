@@ -1,0 +1,49 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "frontend": {
+      "root": ".",
+      "framework": "nextjs"
+    },
+    "api": {
+      "root": ".",
+      "framework": "fastapi",
+      "entrypoint": "web_backend.app.main:app",
+      "installCommand": "pip install -r web_backend/requirements.txt"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/health",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "frontend"
+      }
+    }
+  ],
+  "daemons": {
+    "search-worker": {
+      "root": ".",
+      "entrypoint": "Dockerfile.search-worker",
+      "instances": {
+        "iad1": 1
+      },
+      "resources": {
+        "requests": {
+          "memory": "1Gi"
+        }
+      }
+    }
+  }
+}

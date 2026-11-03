@@ -10,9 +10,9 @@ A web-only job-search workspace for TopJobs.lk. It uses Next.js for the website,
 - Dashboard with recent runs, matched jobs, and a match rate based on jobs reviewed in the most recent 1,000 runs. A fit score is raw points, not a hiring probability.
 - Editable email and cover-letter drafts; the resume is attached only after checking the explicit approval box and choosing **Send approved email**.
 - Gmail App Password encryption on the API server using Fernet. The password is never returned to the browser or written to application logs.
-- Vercel frontend and Render Docker API deployment configuration.
+- Next.js and FastAPI deployed together with Vercel Services, plus a Vercel Queues daemon for durable search work.
 
-PDFs must contain extractable text; scanned-image resume OCR is not provided. Job discovery is limited to TopJobs.lk. SMTP acceptance is recorded as **Gmail accepted**, not proof of delivery or employer receipt. Search work runs inside the API process, so a host restart can interrupt a run; see [hosting limitations](#hosting-limitations).
+PDFs must contain extractable text; scanned-image resume OCR is not provided. Job discovery is limited to TopJobs.lk. SMTP acceptance is recorded as **Gmail accepted**, not proof of delivery or employer receipt. Production searches are queued and processed by a Vercel Daemon; queue delivery is retried if the worker exits.
 
 ## Run locally
 
@@ -36,6 +36,8 @@ SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVER_ONLY_SERVICE_ROLE_KEY
 APP_CREDENTIALS_ENCRYPTION_KEY=YOUR_FERNET_KEY
 WEB_ALLOWED_ORIGINS=http://localhost:3000
+SEARCH_QUEUE_BACKEND=local
+VERCEL_QUEUE_REGION=iad1
 ```
 
 Generate a Fernet key locally; keep it private and do not change it after saving Gmail credentials unless you are prepared to re-enter them:
@@ -66,35 +68,33 @@ python -m uvicorn web_backend.app.main:app --host 127.0.0.1 --port 8000 --reload
 
 On Windows, activate the virtual environment with `.venv\Scripts\activate` in PowerShell instead. Open `http://localhost:3000`, register, upload a resume, save your search preferences, and run a search.
 
-## Host publicly
+## Deploy frontend, API, and worker on Vercel
 
-There is no production deployment configured by this repository yet. Create the provider resources with your own accounts and add secrets through their dashboards; do not commit them.
+The root `vercel.json` defines the Next.js frontend and FastAPI API as Vercel Services in one project. `/api/*` and `/health` route to FastAPI; other paths route to Next.js. The Python search worker runs as a Vercel Daemon and consumes durable Vercel Queue messages. Keep the Vercel project root set to the repository root.
 
-### Supabase
+In the existing Vercel project, configure these environment variables for **Production**:
 
-Apply the SQL migration, configure the production auth redirect URL, and use the same project URL and anon key in both frontend and API settings. The `SUPABASE_SERVICE_ROLE_KEY` must only be configured on the API service. Keep the private `private-resumes` bucket and RLS policies from the migration enabled.
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL for browser authentication |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key for browser authentication (legacy anon key is also accepted) |
+| `SUPABASE_URL` | Supabase project URL for FastAPI and the worker |
+| `SUPABASE_ANON_KEY` | Supabase publishable/anon key used by the API to validate sessions |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only API/worker access; never use a `NEXT_PUBLIC_` name |
+| `APP_CREDENTIALS_ENCRYPTION_KEY` | Fernet key used to encrypt saved Gmail App Passwords |
+| `WEB_ALLOWED_ORIGINS` | Your exact Vercel site origin, e.g. `https://your-site.vercel.app` |
+| `SEARCH_QUEUE_BACKEND` | Set to `vercel` in Production to enqueue searches |
+| `VERCEL_QUEUE_REGION` | Queue and daemon region; keep both on the same supported region (`iad1` by default) |
 
-### FastAPI on Render
+Do not set `NEXT_PUBLIC_API_BASE_URL` in Production: the frontend calls same-origin `/api/*` routes. Keep `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` in `.env.local` for local development. Set the Supabase production redirect URL to `https://YOUR_VERCEL_HOST/auth/callback`.
 
-1. Connect the GitHub repository to Render and create a Blueprint from `render.yaml`.
-2. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `APP_CREDENTIALS_ENCRYPTION_KEY` in the API service's Environment settings.
-3. After the Vercel site is created, set `WEB_ALLOWED_ORIGINS` to its exact HTTPS origin, for example `https://your-site.vercel.app` (no trailing slash).
-4. Deploy and verify `https://YOUR_API_HOST/health` returns `{"status":"ok"}`.
+Vercel Queues and Daemons are currently beta features. Daemons run only for Production, not Preview deployments. Hobby includes 1,000,000 queue operations, but its daemon quotas are 5 active CPU-hours and 420 GB-hours of provisioned memory per month. This worker requests 1 GiB; its memory quota is therefore exhausted before a full month of continuous uptime. If the quota is reached, the worker pauses and queued messages can expire after seven days. Upgrade or monitor quotas before relying on uninterrupted job processing. Check the Vercel deployment logs and `https://YOUR_VERCEL_HOST/health` after deploying.
 
-### Next.js on Vercel
-
-1. Import the same repository into Vercel; use the repository root as the project root and the default Next.js build settings.
-2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (or the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY`), and `NEXT_PUBLIC_API_BASE_URL` to the Supabase project and deployed API URLs.
-3. Deploy, add the final Vercel HTTPS origin to Render's `WEB_ALLOWED_ORIGINS`, and add `https://YOUR_VERCEL_HOST/auth/callback` to Supabase's allowed redirect URLs.
-4. Redeploy the API after changing its CORS origin, then test sign-up, confirmation, sign-in, resume upload, search, and email review/send.
-
-After connecting both services to the repository, pushes to the configured production branch trigger Vercel and Render deployments. Visitors see the latest version after its build completes; there is no installer or desktop updater.
-
-Do not host the scraper as a Vercel serverless function: scraping may take longer than a serverless execution limit. Vercel serves the UI; FastAPI handles the Python work.
+Vercel does not replace Supabase. Keep the existing Supabase tables, row-level security policies, and private `private-resumes` bucket. Apply the migration only if the project does not already have this schema; it is not necessary to reconnect or recreate Supabase data.
 
 ## Hosting limitations
 
-The included search runner uses FastAPI in-process background tasks and persists progress/results incrementally. This is suitable for trying the personal workflow on a small service, but it is **not a durable task queue**: a container restart can interrupt an active run. Render's free service can sleep after inactivity; browser polling keeps the API active during ordinary searches but does not protect against a restart. For reliable long searches, use an always-on API/worker host or add a durable queue before relying on unattended execution. The app does not scan continuously.
+Production search requests are stored in Supabase and sent to Vercel Queues. The daemon processes them outside the HTTP request and the queue can redeliver unacknowledged jobs. Vercel Daemons are production-only and Hobby memory/CPU quotas can pause them; queued messages have a maximum seven-day retention. Preview deployments do not process searches. The app does not scan continuously.
 
 Confirm TopJobs.lk's applicable terms and rate limits before using the scraper. The parser can also need maintenance if the site changes. Free provider plans, quotas, sleep behavior, and availability can change; public hosting is not guaranteed to remain free.
 
