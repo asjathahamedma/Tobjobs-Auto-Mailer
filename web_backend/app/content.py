@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 
 
 @dataclass(frozen=True)
@@ -23,15 +24,29 @@ def generate_application_content(
     evidence = ", ".join(list(dict.fromkeys(
         keyword.strip() for keyword in matched_keywords if keyword.strip()
     ))[:4])
+    summary = profile_summary.strip()
+    generic_terms = {
+        "a", "an", "and", "at", "for", "in", "of", "on", "or", "the", "to", "with",
+        "engineer", "developer", "manager", "specialist", "analyst", "senior", "junior",
+        "lead", "position", "role",
+    }
+    job_terms = {
+        term
+        for value in [job_title, *matched_keywords]
+        for term in re.findall(r"[a-z0-9+#]+", value.casefold())
+        if term not in generic_terms
+    }
+    summary_terms = set(re.findall(r"[a-z0-9+#]+", summary.casefold()))
+    relevant_summary = summary if job_terms & summary_terms else ""
 
     email_paragraphs = [
         "Dear Hiring Team,",
         f"I am writing to apply for the {title} position advertised on TopJobs.lk.",
     ]
-    if profile_summary.strip():
+    if relevant_summary:
         email_paragraphs.append(
             f"My attached resume outlines my background relevant to this opportunity. "
-            f"{profile_summary.strip().rstrip('.')}."
+            f"{relevant_summary.rstrip('.')}."
         )
     else:
         email_paragraphs.append("I have attached my resume for your consideration.")
@@ -51,10 +66,10 @@ def generate_application_content(
         "Dear Hiring Manager,",
         f"I am writing to apply for the {title} position at {company_name}.",
     ]
-    if profile_summary.strip():
+    if relevant_summary:
         cover_paragraphs.append(
             f"My resume provides an overview of my background and skills. "
-            f"{profile_summary.strip().rstrip('.')}."
+            f"{relevant_summary.rstrip('.')}."
         )
     else:
         cover_paragraphs.append(

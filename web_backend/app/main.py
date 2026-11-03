@@ -45,6 +45,10 @@ class SearchFailedPermanently(Exception):
     pass
 
 
+class SearchCancelled(Exception):
+    pass
+
+
 app = FastAPI(title="TopJobs Auto Mailer API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -188,15 +192,32 @@ def _execute_search(
             settings.supabase_service_role_key,
             service_role=True,
         )
-        db.request(
+        started = db.request(
             "PATCH",
             "search_runs",
-            params={"id": f"eq.{run_id}", **_user_filter(user)},
+            params={
+                "id": f"eq.{run_id}",
+                **_user_filter(user),
+                "status": "in.(queued,running)",
+            },
             body={"status": "running", "started_at": started_at, "progress": {
                 "stage": "starting", "percent": 0, "detail": "Starting a TopJobs search."
             }},
-            prefer="return=minimal",
+            prefer="return=representation",
         )
+        if not started:
+            return
+
+        def ensure_not_cancelled():
+            rows = db.request(
+                "GET",
+                "search_runs",
+                params={"id": f"eq.{run_id}", **_user_filter(user), "select": "status"},
+            )
+            current = _one(rows, "Search run not found.")
+            if current["status"] == "cancelled":
+                raise SearchCancelled()
+
         settings = {**_settings_defaults(), **_read_user_settings(db, user)}
         resumes = db.request(
             "GET",
@@ -229,6 +250,7 @@ def _execute_search(
         last_progress = {"stage": "starting", "percent": 0, "detail": "Starting a TopJobs search."}
 
         def persist_job(record: dict):
+            ensure_not_cancelled()
             listing = {
                 key: value for key, value in record.items()
                 if key in {
@@ -378,6 +400,7 @@ def _execute_search(
             _persist_progress(db, user, run_id, last_progress)
 
         def progress(update: dict):
+            ensure_not_cancelled()
             last_progress.update(update)
             level = update.get("level", "info")
             if update.get("detail"):
@@ -392,11 +415,12 @@ def _execute_search(
             persist_job,
             progress,
         )
+        ensure_not_cancelled()
         status = "partially_completed" if counts["errors"] else "completed"
-        db.request(
+        completed = db.request(
             "PATCH",
             "search_runs",
-            params={"id": f"eq.{run_id}", **_user_filter(user)},
+            params={"id": f"eq.{run_id}", **_user_filter(user), "status": "eq.running"},
             body={
                 "status": status,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -409,9 +433,12 @@ def _execute_search(
                 },
                 "error_summary": f"{counts['errors']} listing/category errors" if counts["errors"] else "",
             },
-            prefer="return=minimal",
+            prefer="return=representation",
         )
-        _add_run_event(db, user, run_id, "info", "Search run completed.")
+        if completed:
+            _add_run_event(db, user, run_id, "info", "Search run completed.")
+    except SearchCancelled:
+        logger.info("Search run %s was cancelled; saved results were retained.", run_id)
     except Exception as exc:
         logger.exception("Search run %s failed", run_id)
         try:
@@ -419,7 +446,11 @@ def _execute_search(
             db.request(
                 "PATCH",
                 "search_runs",
-                params={"id": f"eq.{run_id}", **_user_filter(user)},
+                params={
+                    "id": f"eq.{run_id}",
+                    **_user_filter(user),
+                    "status": "in.(queued,running)",
+                },
                 body={
                     "status": "failed" if is_final_attempt else "queued",
                     "completed_at": datetime.now(timezone.utc).isoformat() if is_final_attempt else None,
@@ -985,6 +1016,47 @@ def get_search_run(
     return {**run, "events": events}
 
 
+@app.post("/api/search-runs/{run_id}/cancel")
+def cancel_search_run(
+    run_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    rows = db.request(
+        "PATCH",
+        "search_runs",
+        params={
+            **_user_filter(user),
+            "id": f"eq.{run_id}",
+            "status": "in.(queued,running)",
+            "select": "*",
+        },
+        body={
+            "status": "cancelled",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "progress": {
+                "stage": "cancelled",
+                "percent": 100,
+                "detail": "Search stopped. Results saved before stopping were kept.",
+            },
+        },
+        prefer="return=representation",
+    )
+    if rows:
+        return _one(rows, "Search run not found.")
+    existing = _one(
+        db.request(
+            "GET",
+            "search_runs",
+            params={**_user_filter(user), "id": f"eq.{run_id}", "select": "*"},
+        ),
+        "Search run not found.",
+    )
+    if existing["status"] == "cancelled":
+        return existing
+    raise HTTPException(status_code=409, detail="This search is no longer running.")
+
+
 @app.get("/api/applications")
 def list_applications(
     user: Annotated[AuthenticatedUser, Depends(require_user)],
@@ -1040,6 +1112,11 @@ def generate_content(
         ),
         "Application not found.",
     )
+    if app_row["status"] not in {"awaiting_review", "ready_to_apply", "failed"}:
+        raise HTTPException(
+            status_code=409,
+            detail="Only unsent applications can have their drafts regenerated.",
+        )
     job = app_row.get("job_listings") or {}
     match_rows = db.request(
     "GET",

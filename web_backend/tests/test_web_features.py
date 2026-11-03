@@ -192,6 +192,68 @@ class WebFeatureTests(unittest.TestCase):
         self.assertIn("React", content.email)
         self.assertIn("555-0100", content.email)
 
+    def test_unrelated_resume_summary_is_not_added_to_application_drafts(self):
+        content = generate_application_content(
+            job_title="Senior UI UX Engineer",
+            company="Treinetic (Pvt) Ltd",
+            applicant_name="Taylor Example",
+            profile_summary=(
+                "This profile targets data science and AI/ML roles involving Python analysis, "
+                "model development, machine learning, and practical data workflows."
+            ),
+            matched_keywords=["UI", "UX", "React"],
+            contact={},
+        )
+        self.assertIn("Senior UI UX Engineer", content.subject)
+        self.assertIn("Treinetic (Pvt) Ltd", content.cover_letter)
+        self.assertNotIn("data science", content.email)
+        self.assertNotIn("data science", content.cover_letter)
+
+    def test_sent_application_drafts_cannot_be_regenerated(self):
+        class FakeDatabase:
+            def __init__(self):
+                self.calls = []
+
+            def request(self, method, table, **kwargs):
+                self.calls.append((method, table))
+                return [{
+                    "id": "application-1",
+                    "job_id": "job-1",
+                    "status": "applied",
+                    "job_listings": {"title": "Engineer", "company": "Example Ltd"},
+                }]
+
+        database = FakeDatabase()
+        with self.assertRaises(HTTPException) as error:
+            api_main.generate_content(
+                "application-1",
+                AuthenticatedUser("user-1", "user@example.com", "access-token"),
+                database,
+            )
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(database.calls, [("GET", "applications")])
+
+    def test_running_search_can_be_cancelled_and_saved_results_are_kept(self):
+        class FakeDatabase:
+            def __init__(self):
+                self.calls = []
+
+            def request(self, method, table, *, params=None, body=None, **kwargs):
+                self.calls.append((method, table, params, body))
+                if method == "PATCH":
+                    return [{"id": "run-1", "status": "cancelled", **body}]
+                raise AssertionError(f"Unexpected database request: {method} {table}")
+
+        database = FakeDatabase()
+        result = api_main.cancel_search_run(
+            "run-1",
+            AuthenticatedUser("user-1", "user@example.com", "access-token"),
+            database,
+        )
+        self.assertEqual(result["status"], "cancelled")
+        self.assertIn("kept", result["progress"]["detail"])
+        self.assertEqual(database.calls[0][2]["status"], "in.(queued,running)")
+
     @patch("web_backend.app.auth.requests.get")
     @patch("web_backend.app.auth.get_settings")
     def test_authentication_forwards_the_supplied_bearer_token(self, get_settings, get):
