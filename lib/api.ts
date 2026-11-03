@@ -31,8 +31,21 @@ async function authenticatedFetch(path: string, init: RequestInit): Promise<Resp
 
 async function throwApiError(response: Response) {
   if (response.ok) return;
-  const payload = await response.json().catch(() => null);
-  throw new Error(payload?.detail || `Request failed (${response.status}).`);
+  const body = await response.text();
+  let payload: { detail?: string } | null = null;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    payload = null;
+  }
+  const requestId = response.headers.get("x-request-id");
+  let detail = payload?.detail;
+  if (!detail || detail === "Internal Server Error") {
+    detail = response.status >= 500
+      ? "The API encountered an unexpected error. Check the backend runtime logs before retrying."
+      : `Request failed (${response.status}).`;
+  }
+  throw new Error(requestId ? `${detail} (Reference: ${requestId})` : detail);
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {

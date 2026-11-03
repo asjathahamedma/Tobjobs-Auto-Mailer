@@ -933,6 +933,7 @@ def send_approved_email(
     approval: ApprovedSend,
     user: Annotated[AuthenticatedUser, Depends(require_user)],
     db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+    request: Request,
 ):
     app_row = _one(
         db.request(
@@ -944,12 +945,19 @@ def send_approved_email(
     )
     if app_row["status"] == "applied":
         raise HTTPException(status_code=409, detail="This application has already been sent.")
+    if app_row["status"] == "sending":
+        raise HTTPException(
+            status_code=409,
+            detail="This email is already being sent or its outcome is still being confirmed. Check Gmail Sent before taking further action.",
+        )
     job = app_row.get("job_listings") or {}
     recipient = (job.get("company_email") or "").strip()
     if not recipient or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", recipient):
         raise HTTPException(status_code=422, detail="The listing does not have a valid application email.")
     if not app_row.get("generated_subject") or not app_row.get("generated_email"):
         raise HTTPException(status_code=409, detail="Generate and review the application email first.")
+    if "\r" in app_row["generated_subject"] or "\n" in app_row["generated_subject"]:
+        raise HTTPException(status_code=422, detail="The email subject contains invalid line breaks. Edit and save the subject before sending.")
     match_rows = db.request(
         "GET",
         "job_matches",
@@ -986,10 +994,11 @@ def send_approved_email(
     )
     attached_pdf = MIMEBase("application", "pdf")
     attached_pdf.set_payload(attachment.content)
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "_", resume.get("file_name") or "resume.pdf")[:120]
     attached_pdf.add_header(
         "Content-Disposition",
         "attachment",
-        filename=resume.get("file_name") or "resume.pdf",
+        filename=filename,
     )
     encoders.encode_base64(attached_pdf)
     message.attach(attached_pdf)
@@ -1008,22 +1017,64 @@ def send_approved_email(
     )
     if not claimed:
         raise HTTPException(status_code=409, detail="This application is already being sent or is not ready to send.")
+    submission_started = False
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context(), timeout=30) as server:
             server.login(credential["sender_email"], password)
-            refused = server.sendmail(credential["sender_email"], recipient, message.as_string())
+            serialized_message = message.as_string()
+            submission_started = True
+            refused = server.sendmail(credential["sender_email"], recipient, serialized_message)
         if refused:
             raise smtplib.SMTPRecipientsRefused(refused)
-    except (smtplib.SMTPException, OSError) as exc:
-        logger.warning("SMTP send failed for application %s: %s", application_id, type(exc).__name__)
+    except (smtplib.SMTPAuthenticationError, smtplib.SMTPRecipientsRefused, smtplib.SMTPDataError) as exc:
+        logger.exception(
+            "Gmail rejected application email %s (request %s)",
+            application_id,
+            request.state.request_id,
+        )
         db.request(
             "PATCH",
             "applications",
-            params={**_user_filter(user), "id": f"eq.{application_id}"},
+            params={**_user_filter(user), "id": f"eq.{application_id}", "status": "eq.sending"},
             body={"status": "failed", "last_error": "SMTP send failed. Verify the address and App Password, then retry."},
             prefer="return=minimal",
         )
-        raise HTTPException(status_code=502, detail="Gmail did not accept the email. Verify your App Password and try again.") from exc
+        if isinstance(exc, smtplib.SMTPAuthenticationError):
+            detail = "Gmail rejected the sign-in. Verify the sender address and its Google App Password in Settings."
+        else:
+            detail = "Gmail rejected the recipient or message. Verify the recipient address and reviewed email."
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except (smtplib.SMTPException, OSError) as exc:
+        logger.exception(
+            "SMTP transport failed for application %s (request %s)",
+            application_id,
+            request.state.request_id,
+        )
+        if submission_started:
+            db.request(
+                "PATCH",
+                "applications",
+                params={**_user_filter(user), "id": f"eq.{application_id}", "status": "eq.sending"},
+                body={
+                    "last_error": "Email submission outcome is uncertain. Check Gmail Sent before attempting another send."
+                },
+                prefer="return=minimal",
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="The connection ended during email submission, so Gmail's acceptance could not be confirmed. Check Gmail Sent before retrying; this application is locked to prevent duplicate email.",
+            ) from exc
+        db.request(
+            "PATCH",
+            "applications",
+            params={**_user_filter(user), "id": f"eq.{application_id}", "status": "eq.sending"},
+            body={"status": "failed", "last_error": "Could not connect to Gmail. Verify mailer settings and retry."},
+            prefer="return=minimal",
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Could not connect to Gmail before submitting the email. Check the sender address and App Password, then retry.",
+        ) from exc
 
     rows = db.request(
         "PATCH",
@@ -1038,4 +1089,14 @@ def send_approved_email(
         },
         prefer="return=representation",
     )
+    if not rows:
+        logger.error(
+            "Gmail accepted application email %s but status update returned no row (request %s)",
+            application_id,
+            request.state.request_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Gmail accepted the email, but the application status could not be updated. Do not retry; check Gmail Sent and refresh the application.",
+        )
     return _one(rows, "Email was accepted, but application status could not be updated.")

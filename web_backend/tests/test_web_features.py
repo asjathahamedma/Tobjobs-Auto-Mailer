@@ -1,5 +1,7 @@
 import unittest
 from datetime import date
+from email import policy
+from email.parser import BytesParser
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -257,13 +259,101 @@ class WebFeatureTests(unittest.TestCase):
                 ApprovedSend(approved=True),
                 AuthenticatedUser("user-1", "applicant@example.com", "access-token"),
                 database,
+                SimpleNamespace(state=SimpleNamespace(request_id="request-test")),
             )
 
         self.assertEqual(result["status"], "applied")
         smtp_ssl.assert_called_once()
         smtp.login.assert_called_once_with("applicant@example.com", "gmail-app-password")
         smtp.sendmail.assert_called_once()
-        self.assertIn("Content-Type: application/pdf", smtp.sendmail.call_args.args[2])
+        self.assertEqual(smtp.sendmail.call_args.args[0], "applicant@example.com")
+        self.assertEqual(smtp.sendmail.call_args.args[1], "jobs@example.com")
+        parsed_message = BytesParser(policy=policy.default).parsebytes(
+            smtp.sendmail.call_args.args[2].encode()
+        )
+        self.assertEqual(parsed_message["Subject"], "Application")
+        self.assertEqual(parsed_message.get_body(preferencelist=("plain",)).get_content().strip(), "Please review my application.")
+        self.assertEqual(parsed_message.get_payload()[1].get_content_type(), "application/pdf")
+        self.assertEqual(parsed_message.get_payload()[1].get_filename(), "resume.pdf")
+
+    def test_sending_application_cannot_be_submitted_twice(self):
+        class FakeDatabase:
+            def request(self, method, table, *, params=None, **kwargs):
+                if method == "GET" and table == "applications":
+                    return [{
+                        "id": "application-1",
+                        "status": "sending",
+                    }]
+                raise AssertionError(f"Unexpected database request: {method} {table}")
+
+        with patch.object(api_main.smtplib, "SMTP_SSL") as smtp_ssl:
+            with self.assertRaises(HTTPException) as error:
+                api_main.send_approved_email(
+                    "application-1",
+                    ApprovedSend(approved=True),
+                    AuthenticatedUser("user-1", "applicant@example.com", "access-token"),
+                    FakeDatabase(),
+                    SimpleNamespace(state=SimpleNamespace(request_id="request-test")),
+                )
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertIn("Check Gmail Sent", error.exception.detail)
+        smtp_ssl.assert_not_called()
+
+    def test_gmail_authentication_failure_has_clear_error_and_marks_failed(self):
+        application = {
+            "id": "application-1",
+            "job_id": "job-1",
+            "status": "awaiting_review",
+            "generated_subject": "Application",
+            "generated_email": "Please review my application.",
+            "job_listings": {"company_email": "jobs@example.com"},
+        }
+
+        class FakeDatabase:
+            def __init__(self):
+                self.status_updates = []
+
+            def request(self, method, table, *, params=None, body=None, **kwargs):
+                if method == "GET" and table == "applications":
+                    return [application]
+                if method == "GET" and table == "job_matches":
+                    return [{"resumes": {"storage_path": "user-1/resume.pdf", "file_name": "resume.pdf"}}]
+                if method == "GET" and table == "mailer_credentials":
+                    return [{"sender_email": "applicant@example.com", "encrypted_app_password": "encrypted"}]
+                if method == "GET" and table == "user_settings":
+                    return []
+                if method == "PATCH" and table == "applications":
+                    self.status_updates.append(body)
+                    return [{"id": "application-1"}]
+                raise AssertionError(f"Unexpected database request: {method} {table}")
+
+            def storage_request(self, method, path):
+                return SimpleNamespace(content=b"%PDF-1.4 test resume")
+
+        database = FakeDatabase()
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        smtp.login.side_effect = api_main.smtplib.SMTPAuthenticationError(535, b"Authentication failed")
+        with (
+            patch.object(api_main.smtplib, "SMTP_SSL", return_value=smtp),
+            patch.object(api_main, "_require_encryption", return_value=SimpleNamespace(
+                decrypt=lambda _: b"gmail-app-password",
+            )),
+        ):
+            with self.assertLogs("topjobs_web_api", level="ERROR"):
+                with self.assertRaises(HTTPException) as error:
+                    api_main.send_approved_email(
+                        "application-1",
+                        ApprovedSend(approved=True),
+                        AuthenticatedUser("user-1", "applicant@example.com", "access-token"),
+                        database,
+                        SimpleNamespace(state=SimpleNamespace(request_id="request-test")),
+                    )
+
+        self.assertEqual(error.exception.status_code, 502)
+        self.assertIn("Gmail rejected the sign-in", error.exception.detail)
+        self.assertEqual(database.status_updates[-1]["status"], "failed")
+        smtp.sendmail.assert_not_called()
 
 
 if __name__ == "__main__":
