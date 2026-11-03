@@ -72,6 +72,8 @@ On Windows, activate the virtual environment with `.venv\Scripts\activate` in Po
 
 The root `vercel.json` defines the Next.js frontend and FastAPI API as Vercel Services in one project. `/api/*` and `/health` route to FastAPI; other paths route to Next.js. The Python search worker runs as a Vercel Daemon and consumes durable Vercel Queue messages. Keep the Vercel project root set to the repository root.
 
+The root `requirements.txt` contains only the FastAPI function's runtime dependencies so Vercel can optimize the Python bundle. The local backend and Docker worker use `web_backend/requirements.txt`; optional image OCR imports OpenCV and NumPy only when enabled.
+
 In the existing Vercel project, configure these environment variables for **Production**:
 
 | Variable | Purpose |

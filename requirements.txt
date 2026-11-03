@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+pydantic-settings>=2.5,<3
+python-multipart>=0.0.9,<1
+cryptography>=43,<47
+python-dotenv>=1,<2
+requests>=2.32,<3
+beautifulsoup4>=4.12,<5
+pypdf>=5,<7
+vercel-queue[typed]>=0.10,<0.11

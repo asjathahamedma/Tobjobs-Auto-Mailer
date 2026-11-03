@@ -8,8 +8,7 @@
     "api": {
       "root": ".",
       "framework": "fastapi",
-      "entrypoint": "web_backend.app.main:app",
-      "installCommand": "pip install -r web_backend/requirements.txt"
+      "entrypoint": "web_backend.app.main:app"
     }
   },
   "rewrites": [

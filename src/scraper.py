@@ -5,8 +5,6 @@ import warnings
 from datetime import datetime
 from urllib.parse import urljoin
 
-import cv2
-import numpy as np
 import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
@@ -200,6 +198,14 @@ def ocr_ad_images(image_urls, enabled=None):
     reader = get_ocr_reader(enabled=enabled)
     if not reader or not image_urls:
         return ""
+
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as exc:
+        raise RuntimeError(
+            "Image OCR requires opencv-python-headless and numpy on this service."
+        ) from exc
 
     extracted_chunks = []
     for image_url in image_urls:
