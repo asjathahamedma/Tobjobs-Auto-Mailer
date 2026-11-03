@@ -1,30 +1,26 @@
-# Environment variables
+# Environment and secrets
 .env
+.env.local
+.env.*.local
 
-# Python cache
+# Python
 .venv/
 .python/
+venv/
 __pycache__/
 *.pyc
 
-# Node / frontend
+# Next.js / Node
 node_modules/
-ui/dist/
+.next/
+out/
 *.tsbuildinfo
 
-# Tauri / Rust
-src-tauri/target/
-src-tauri/gen/
-
-# Data and Log files
+# User data and logs
 data/
 logs/
-
-# Local/private user files
 resumes/
 *.pdf
 
-# Build outputs and release artifacts
+# Build artifacts
 dist/
-*.exe
-*.msi

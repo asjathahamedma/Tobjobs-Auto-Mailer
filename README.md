@@ -1,147 +1,120 @@
-# TopJobs Auto Mailer
+# TopJobs Auto Mailer — Web
 
-TopJobs Auto Mailer is a Windows desktop app that searches TopJobs.lk, matches jobs against resume profiles, and helps send tailored applications through Gmail.
+A web-only job-search workspace for TopJobs.lk. It uses Next.js for the website, Supabase for sign-in and private user data, and a separate FastAPI service for scraping and Gmail SMTP. The search is started manually; the app does not submit website applications or send email without your explicit review and approval.
 
-Version 2 rebuilt the old Python script into a production-style desktop app using **Tauri + React + Tailwind + Vite**, while keeping the existing Python automation engine.
+## What is included
 
-## Workflow Demo
+- Email/password registration and sign-in using Supabase Auth; no Google OAuth.
+- User-scoped settings, private PDF resume storage, and RLS-protected job, search, and application records.
+- TopJobs.lk category and advert scraping with existing weighted keyword matching.
+- Dashboard with recent runs, matched jobs, and a match rate based on jobs reviewed in the most recent 1,000 runs. A fit score is raw points, not a hiring probability.
+- Editable email and cover-letter drafts; the resume is attached only after checking the explicit approval box and choosing **Send approved email**.
+- Gmail App Password encryption on the API server using Fernet. The password is never returned to the browser or written to application logs.
+- Vercel frontend and Render Docker API deployment configuration.
 
-[Watch the Version 2 workflow demo](docs/media/topjobs-automailer-workflow-v2.mp4)
+PDFs must contain extractable text; scanned-image resume OCR is not provided. Job discovery is limited to TopJobs.lk. SMTP acceptance is recorded as **Gmail accepted**, not proof of delivery or employer receipt. Search work runs inside the API process, so a host restart can interrupt a run; see [hosting limitations](#hosting-limitations).
 
-## Download and Install
+## Run locally
 
-Normal users only need the Windows setup file. They do not need to download the source code, install Python, install Node.js, or run any commands.
+### 1. Create Supabase resources
 
-1. Open the GitHub Releases page:
+1. Create a Supabase project.
+2. In the Supabase SQL Editor, run `supabase/migrations/202611010001_initial_web_schema.sql` (or use the Supabase CLI to link the project and run `supabase db push`).
+3. In **Authentication → URL Configuration**, set the local site URL to `http://localhost:3000` and allow `http://localhost:3000/auth/callback`. For production, add the deployed Vercel origin and its `/auth/callback` URL.
+4. Copy the project URL, anon/publishable key, and service-role key from the project API settings. The service-role key is for the API server only.
 
-[TopJobs Auto Mailer Releases](https://github.com/asjathahamedma/Tobjobs-Auto-Mailer/releases)
+### 2. Configure environment variables
 
-2. Download the latest setup file:
-
-`TopJobs Auto Mailer_2.3.2_x64-setup.exe`
-
-3. Double-click the setup file and install the app.
-
-4. On first launch, create a local account, add your Gmail address and app password using the in-app guide, and set up your sender profile. Then import a PDF resume and start a workflow when ready.
-
-Developer note: the installer is a large build artifact, so it is uploaded to GitHub Releases instead of being committed into this repository.
-
-## Version 2 Features
-
-- Modern desktop UI with Dashboard, Jobs, Resume Profiles, and Settings pages.
-- First-launch local account registration and sign-in; no demo profile or job activity is created for a new install.
-- New installs wait for setup before automation can run.
-- A GitHub release check shows an in-app update prompt when a newer published version is available.
-- Gmail app passwords are saved in the computer's operating-system credential store.
-- The Gmail App Password field includes a step-by-step guide that opens Google's app-password page.
-- Professional job-specific application emails and optional generated cover-letter PDF attachments.
-- Start and stop the automation from the app UI.
-- Live workflow progress, logs, stage counter, and progress bar.
-- Today Summary with scanned, reviewed, matched, skipped, and applied totals.
-- Skip reason breakdown for no email, already applied, low fit, senior role, excluded role, remote required, and missing resume.
-- Profile performance analytics showing which resume/profile gets the most matches and applications.
-- Jobs table with filters, match score, resume used, status badge, skipped reason, and apply status.
-- Resume import flow that analyzes a PDF and creates an editable resume profile.
-- Local history from SQLite, CSV files, and logs.
-- Windows startup automation can be enabled or disabled from Settings.
-
-## How It Works
-
-1. Register or sign in to the local account on this computer.
-2. Add sender details in Settings or during first-run setup.
-3. Enter a Gmail address and Gmail app password during first-run setup (or later in Settings).
-4. Import one or more PDF resumes in Resume Profiles.
-5. The app creates resume profiles with detected title keywords, description keywords, and summaries.
-6. Start the workflow from the Dashboard.
-7. Python automation scans TopJobs, filters jobs by date and role fit, chooses the matching resume profile, and applies when an email is available.
-8. The UI shows live progress and stores the result history locally.
-
-The local app account and resume/profile data stay on this computer. Account passwords are stored as salted PBKDF2 hashes. Gmail app passwords are stored in the operating-system credential store and are not written to the app config or `.env` file.
-
-## Gmail App Password Setup
-
-The app never asks for a user's normal Google password. Each user supplies a Gmail address and a dedicated app password.
-
-The app includes a **How do I get a Gmail app password?** guide beside the password field. In brief: enable 2-Step Verification on the Google account, open [Google App Passwords](https://myaccount.google.com/apppasswords), create an app password, then paste it into the app. If Google does not offer App Passwords for an account, its account type, administrator, or security settings may not allow them.
-
-Generated cover letters are saved locally as PDFs and attached with the resume when the cover-letter setting is enabled. The letter uses only the profile summary and matched job keywords; review your profile details before enabling automated applications.
-
-## App Updates
-
-The desktop app checks GitHub Releases when it opens and shows a prompt when a newer published version is available. The prompt opens that release page; users download and run the Windows installer themselves. It does **not** silently download or install updates.
-
-To publish an update:
-
-1. Make and push your code changes to `main`.
-2. Set the same new version (for example `2.4.0`) in `package.json`, the root `package-lock.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock`.
-3. Commit and push those version changes.
-4. Create and push a matching version tag, for example `git tag v2.4.0` and `git push origin v2.4.0`.
-5. The GitHub Actions workflow at `.github/workflows/release.yml` builds the Windows installer and attaches it to a published GitHub Release automatically.
-
-The workflow requires GitHub Actions to be enabled and the repository's `GITHUB_TOKEN` to have release write access (the workflow requests `contents: write`). The desktop app compares its bundled version with the latest non-draft, non-prerelease GitHub Release; pushing to a branch without publishing a versioned release does not trigger an update prompt.
-
-## Tech Stack
-
-- `ui/` - React, Tailwind CSS, Vite, Framer Motion
-- `src-tauri/` - Tauri Windows desktop shell
-- `tauri_bridge/` - Python bridge used by the Tauri app
-- `src/` - TopJobs scraper, mailer, config, and matching logic
-- `desktop_app/` - history, startup, profile import, and app services
-- `run_automation.py` - main Python automation entrypoint
-
-## Local Development
-
-Install dependencies:
-
-```powershell
-npm install
-uv python install 3.12 --install-dir .python/runtime
-$python = Get-ChildItem .python/runtime -Filter python.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
-uv pip install --python $python --target .python/site-packages -r requirements.txt
-```
-
-Run the desktop app in development:
-
-```powershell
-npm run tauri:dev
-```
-
-Build the production installer:
-
-```powershell
-.\build_desktop_app.bat
-```
-
-The installer is generated at:
+Copy `.env.example` to `.env.local` for Next.js and to `.env` for FastAPI, then fill in the values locally:
 
 ```text
-src-tauri/target/release/bundle/nsis/TopJobs Auto Mailer_2.3.2_x64-setup.exe
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+SUPABASE_ANON_KEY=YOUR_PUBLISHABLE_OR_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVER_ONLY_SERVICE_ROLE_KEY
+APP_CREDENTIALS_ENCRYPTION_KEY=YOUR_FERNET_KEY
+WEB_ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-## Manual Windows Build
+Generate a Fernet key locally; keep it private and do not change it after saving Gmail credentials unless you are prepared to re-enter them:
 
-```powershell
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Never put the service-role key or encryption key in a `NEXT_PUBLIC_` variable, the repository, or a chat message.
+
+### 3. Install and start
+
+In one terminal:
+
+```bash
 npm ci
-uv python install 3.12 --install-dir .python/runtime
-$python = Get-ChildItem .python/runtime -Filter python.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
-uv pip install --python $python --target .python/site-packages -r requirements.txt
-npm run tauri:build
+npm run dev
 ```
 
-## Local Data
+In another terminal, from the repository root:
 
-The app stores runtime data locally and does not commit it to GitHub:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r web_backend/requirements.txt
+python -m uvicorn web_backend.app.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-- `.env` (email address only; legacy installations are migrated)
-- `resumes/`
-- `data/`
-- `logs/`
-- `.python/` (bundled portable Python runtime in release builds)
-- `.venv/` (optional local development environment)
-- `src-tauri/target/`
+On Windows, activate the virtual environment with `.venv\Scripts\activate` in PowerShell instead. Open `http://localhost:3000`, register, upload a resume, save your search preferences, and run a search.
 
-## Notes
+## Host publicly
 
-- This app automates email-based applications only when a job email is found.
-- Users should review their resume profiles and settings before enabling automation.
-- TopJobs pages can change over time, so scraper behavior may need updates if the website changes.
+There is no production deployment configured by this repository yet. Create the provider resources with your own accounts and add secrets through their dashboards; do not commit them.
+
+### Supabase
+
+Apply the SQL migration, configure the production auth redirect URL, and use the same project URL and anon key in both frontend and API settings. The `SUPABASE_SERVICE_ROLE_KEY` must only be configured on the API service. Keep the private `private-resumes` bucket and RLS policies from the migration enabled.
+
+### FastAPI on Render
+
+1. Connect the GitHub repository to Render and create a Blueprint from `render.yaml`.
+2. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `APP_CREDENTIALS_ENCRYPTION_KEY` in the API service's Environment settings.
+3. After the Vercel site is created, set `WEB_ALLOWED_ORIGINS` to its exact HTTPS origin, for example `https://your-site.vercel.app` (no trailing slash).
+4. Deploy and verify `https://YOUR_API_HOST/health` returns `{"status":"ok"}`.
+
+### Next.js on Vercel
+
+1. Import the same repository into Vercel; use the repository root as the project root and the default Next.js build settings.
+2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (or the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY`), and `NEXT_PUBLIC_API_BASE_URL` to the Supabase project and deployed API URLs.
+3. Deploy, add the final Vercel HTTPS origin to Render's `WEB_ALLOWED_ORIGINS`, and add `https://YOUR_VERCEL_HOST/auth/callback` to Supabase's allowed redirect URLs.
+4. Redeploy the API after changing its CORS origin, then test sign-up, confirmation, sign-in, resume upload, search, and email review/send.
+
+After connecting both services to the repository, pushes to the configured production branch trigger Vercel and Render deployments. Visitors see the latest version after its build completes; there is no installer or desktop updater.
+
+Do not host the scraper as a Vercel serverless function: scraping may take longer than a serverless execution limit. Vercel serves the UI; FastAPI handles the Python work.
+
+## Hosting limitations
+
+The included search runner uses FastAPI in-process background tasks and persists progress/results incrementally. This is suitable for trying the personal workflow on a small service, but it is **not a durable task queue**: a container restart can interrupt an active run. Render's free service can sleep after inactivity; browser polling keeps the API active during ordinary searches but does not protect against a restart. For reliable long searches, use an always-on API/worker host or add a durable queue before relying on unattended execution. The app does not scan continuously.
+
+Confirm TopJobs.lk's applicable terms and rate limits before using the scraper. The parser can also need maintenance if the site changes. Free provider plans, quotas, sleep behavior, and availability can change; public hosting is not guaranteed to remain free.
+
+## Gmail App Password
+
+In Settings, follow the in-app guide: enable Google 2-Step Verification, create a Gmail App Password at [Google App Passwords](https://myaccount.google.com/apppasswords), and save it with the sender address. A normal Gmail password is not accepted. The API encrypts the saved App Password; Google SMTP must still accept the sign-in. Each email is sent only after the user checks the approval box. The attached resume is the private PDF selected for that job match.
+
+## Data and migration from the old desktop app
+
+The web project uses a new Supabase account and database; it does not read or import the desktop app's local account, keyring, JSON, CSV, SQLite, or logs. Create a web account, upload your resume PDF, and re-enter your Gmail App Password. Keep a backup of any local desktop data you still need. No local desktop data directory was available in the repository to migrate or verify.
+
+The old desktop installer releases on GitHub are external assets and were not deleted. They should only be retired after the hosted site is deployed, tested, and any local-data migration decision is complete. Publishing a Git commit by itself will not update an already installed desktop app.
+
+## Development checks
+
+```bash
+npm run typecheck
+npm run build
+npm audit
+python -m unittest discover -s web_backend/tests -p 'test_*.py' -v
+```
+
+The historical audit and migration notes are in [`docs/`](./docs/).

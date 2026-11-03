@@ -1,9 +1,0 @@
-requests
-beautifulsoup4
-pandas
-easyocr
-python-dotenv
-opencv-python
-pypdf
-keyring
-reportlab
