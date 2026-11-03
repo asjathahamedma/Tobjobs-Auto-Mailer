@@ -106,6 +106,7 @@ def _settings_defaults() -> dict[str, Any]:
         "minimum_fit_score": 4,
         "require_remote": False,
         "enable_ocr_for_ad_images": False,
+        "auto_apply_enabled": False,
         "category_urls": [
             "https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=HNS&jst=OPEN",
             "https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=SDQ&jst=OPEN",
@@ -247,6 +248,19 @@ def _execute_search(
             if match.get("is_match"):
                 profile_key = match.get("profile_key")
                 matched_resume = next((resume for resume in resumes if resume["id"] == profile_key), None)
+                matched_title_keywords = [
+                    value.strip()
+                    for value in str(match.get("matched_title_keywords", "")).split(",")
+                    if value.strip()
+                ]
+                matched_description_keywords = [
+                    value.strip()
+                    for value in str(match.get("matched_description_keywords", "")).split(",")
+                    if value.strip()
+                ]
+                match_details = str(match.get("fit_feedback", "")).strip()
+                if match.get("profile_label"):
+                    match_details = f"Matched with the {match['profile_label']} profile. {match_details}".strip()
                 db.request(
                     "POST",
                     "job_matches",
@@ -257,13 +271,9 @@ def _execute_search(
                         "resume_id": matched_resume["id"] if matched_resume else None,
                         "search_run_id": run_id,
                         "match_score": int(match.get("fit_score", 0)),
-                        "match_explanation": str(match.get("fit_feedback", "")),
-                        "matched_title_keywords": [
-                            value for value in str(match.get("matched_title_keywords", "")).split(",") if value.strip()
-                        ],
-                        "matched_description_keywords": [
-                            value for value in str(match.get("matched_description_keywords", "")).split(",") if value.strip()
-                        ],
+                        "match_explanation": match_details,
+                        "matched_title_keywords": matched_title_keywords,
+                        "matched_description_keywords": matched_description_keywords,
                         "status": "awaiting_review",
                     },
                     prefer="resolution=ignore-duplicates,return=minimal",
@@ -276,24 +286,84 @@ def _execute_search(
                         "resume_id": matched_resume["id"] if matched_resume else None,
                         "search_run_id": run_id,
                         "match_score": int(match.get("fit_score", 0)),
-                        "match_explanation": str(match.get("fit_feedback", "")),
-                        "matched_title_keywords": [
-                            value for value in str(match.get("matched_title_keywords", "")).split(",") if value.strip()
-                        ],
-                        "matched_description_keywords": [
-                            value for value in str(match.get("matched_description_keywords", "")).split(",") if value.strip()
-                        ],
+                        "match_explanation": match_details,
+                        "matched_title_keywords": matched_title_keywords,
+                        "matched_description_keywords": matched_description_keywords,
                         "last_seen_at": datetime.now(timezone.utc).isoformat(),
                     },
                     prefer="return=minimal",
                 )
-                db.request(
+                matched_keywords = list(dict.fromkeys(matched_title_keywords + matched_description_keywords))
+                contact = {
+                    "phone": settings.get("phone", ""),
+                    "contact_email": settings.get("contact_email", ""),
+                    "linkedin": settings.get("linkedin", ""),
+                    "github": settings.get("github", ""),
+                    "portfolio": settings.get("portfolio", ""),
+                }
+                content = generate_application_content(
+                    job_title=record.get("title", ""),
+                    company=record.get("company", ""),
+                    applicant_name=settings.get("your_name") or settings.get("display_name", ""),
+                    profile_summary=(matched_resume or {}).get("summary", ""),
+                    matched_keywords=matched_keywords,
+                    contact=contact,
+                )
+                new_applications = db.request(
                     "POST",
                     "applications",
-                    params={"on_conflict": "user_id,job_id"},
-                    body={"user_id": user.id, "job_id": job_id, "status": "awaiting_review"},
-                    prefer="resolution=ignore-duplicates,return=minimal",
+                    params={"on_conflict": "user_id,job_id", "select": "id"},
+                    body={
+                        "user_id": user.id,
+                        "job_id": job_id,
+                        "status": "awaiting_review",
+                        "generated_subject": content.subject,
+                        "generated_email": content.email,
+                        "cover_letter": content.cover_letter,
+                    },
+                    prefer="resolution=ignore-duplicates,return=representation",
                 )
+                if settings.get("auto_apply_enabled") and new_applications:
+                    application_id = new_applications[0]["id"]
+                    try:
+                        _send_application_email(
+                            application_id,
+                            user,
+                            db,
+                            request_id=f"search-{run_id}",
+                            automatic=True,
+                        )
+                        _add_run_event(
+                            db,
+                            user,
+                            run_id,
+                            "info",
+                            f"Automatically sent an application email for {record.get('title', 'a matched job')}.",
+                        )
+                    except HTTPException as exc:
+                        logger.warning(
+                            "Automatic application email %s was not sent: %s",
+                            application_id,
+                            exc.detail,
+                        )
+                        db.request(
+                            "PATCH",
+                            "applications",
+                            params={
+                                **_user_filter(user),
+                                "id": f"eq.{application_id}",
+                                "status": "in.(awaiting_review,failed)",
+                            },
+                            body={"last_error": str(exc.detail)[:1000]},
+                            prefer="return=minimal",
+                        )
+                        _add_run_event(
+                            db,
+                            user,
+                            run_id,
+                            "warning",
+                            f"Automatic application email was not sent: {exc.detail}",
+                        )
             counts["jobs_reviewed"] += 1
             counts["matched"] += int(bool(match.get("is_match")))
             counts["skipped"] += int(not bool(match.get("is_match")))
@@ -459,6 +529,27 @@ def update_user_settings(
         )
         if not selected:
             raise HTTPException(status_code=422, detail="Choose a resume profile from your account.")
+    if payload.auto_apply_enabled:
+        credentials = db.request(
+            "GET",
+            "mailer_credentials",
+            params={**_user_filter(user), "select": "sender_email"},
+        )
+        resumes = db.request(
+            "GET",
+            "resumes",
+            params={**_user_filter(user), "select": "id", "limit": 1},
+        )
+        if not credentials:
+            raise HTTPException(
+                status_code=422,
+                detail="Save a Gmail App Password in Settings before enabling automatic applications.",
+            )
+        if not resumes:
+            raise HTTPException(
+                status_code=422,
+                detail="Upload a resume profile before enabling automatic applications.",
+            )
     settings = payload.model_dump()
     db.request(
         "PATCH",
@@ -642,6 +733,72 @@ def update_resume(
         prefer="return=representation",
     )
     return _one(rows, "Resume profile not found.")
+
+
+@app.delete("/api/resumes/{resume_id}")
+def delete_resume(
+    resume_id: str,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    resume = _one(
+        db.request(
+            "GET",
+            "resumes",
+            params={
+                **_user_filter(user),
+                "id": f"eq.{resume_id}",
+                "select": "id,storage_path",
+            },
+        ),
+        "Resume profile not found.",
+    )
+    remaining = db.request(
+        "GET",
+        "resumes",
+        params={
+            **_user_filter(user),
+            "id": f"neq.{resume_id}",
+            "select": "id",
+            "order": "created_at.desc",
+            "limit": 1,
+        },
+    )
+    replacement_id = remaining[0]["id"] if remaining else None
+    settings = _read_user_settings(db, user)
+    selection_changed = settings.get("selected_resume_id") == resume_id
+    selected_resume_id = settings.get("selected_resume_id")
+    if selection_changed:
+        settings["selected_resume_id"] = replacement_id
+        selected_resume_id = replacement_id
+
+    db.request(
+        "PATCH",
+        "job_matches",
+        params={**_user_filter(user), "resume_id": f"eq.{resume_id}"},
+        body={"resume_id": None},
+        prefer="return=minimal",
+    )
+    if selection_changed:
+        db.request(
+            "POST",
+            "user_settings",
+            params={"on_conflict": "user_id"},
+            body={"user_id": user.id, "settings": settings},
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+    deleted = db.request(
+        "DELETE",
+        "resumes",
+        params={**_user_filter(user), "id": f"eq.{resume_id}", "select": "id"},
+        prefer="return=representation",
+    )
+    _one(deleted, "Resume profile was not deleted.")
+    db.storage_request(
+        "DELETE",
+        f"object/private-resumes/{quote(resume['storage_path'], safe='/')}",
+    )
+    return {"ok": True, "selected_resume_id": selected_resume_id}
 
 
 @app.get("/api/jobs")
@@ -927,13 +1084,13 @@ def generate_content(
     return _one(rows, "Could not save application draft.")
 
 
-@app.post("/api/applications/{application_id}/send")
-def send_approved_email(
+def _send_application_email(
     application_id: str,
-    approval: ApprovedSend,
-    user: Annotated[AuthenticatedUser, Depends(require_user)],
-    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
-    request: Request,
+    user: AuthenticatedUser,
+    db: SupabaseRest,
+    *,
+    request_id: str,
+    automatic: bool,
 ):
     app_row = _one(
         db.request(
@@ -950,6 +1107,9 @@ def send_approved_email(
             status_code=409,
             detail="This email is already being sent or its outcome is still being confirmed. Check Gmail Sent before taking further action.",
         )
+    allowed_statuses = {"awaiting_review"} if automatic else {"awaiting_review", "ready_to_apply", "failed"}
+    if app_row["status"] not in allowed_statuses:
+        raise HTTPException(status_code=409, detail="This application is not in a sendable state.")
     job = app_row.get("job_listings") or {}
     recipient = (job.get("company_email") or "").strip()
     if not recipient or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", recipient):
@@ -1009,7 +1169,7 @@ def send_approved_email(
         params={
             **_user_filter(user),
             "id": f"eq.{application_id}",
-            "status": "in.(awaiting_review,ready_to_apply,failed)",
+            "status": "eq.awaiting_review" if automatic else "in.(awaiting_review,ready_to_apply,failed)",
             "select": "id",
         },
         body={"status": "sending", "last_error": ""},
@@ -1030,7 +1190,7 @@ def send_approved_email(
         logger.exception(
             "Gmail rejected application email %s (request %s)",
             application_id,
-            request.state.request_id,
+            request_id,
         )
         db.request(
             "PATCH",
@@ -1048,7 +1208,7 @@ def send_approved_email(
         logger.exception(
             "SMTP transport failed for application %s (request %s)",
             application_id,
-            request.state.request_id,
+            request_id,
         )
         if submission_started:
             db.request(
@@ -1076,27 +1236,50 @@ def send_approved_email(
             detail="Could not connect to Gmail before submitting the email. Check the sender address and App Password, then retry.",
         ) from exc
 
+    completed_at = datetime.now(timezone.utc).isoformat()
+    completion = {
+        "status": "applied",
+        "approved_at": None if automatic else completed_at,
+        "submitted_at": completed_at,
+        "submission_reference": (
+            "Automatically authorized in account settings; Gmail SMTP accepted the message. Delivery is not confirmed."
+            if automatic
+            else "Gmail SMTP accepted the message; delivery is not confirmed."
+        ),
+        "last_error": "",
+    }
     rows = db.request(
         "PATCH",
         "applications",
         params={**_user_filter(user), "id": f"eq.{application_id}", "status": "eq.sending", "select": "id,status,submitted_at,submission_reference"},
-        body={
-            "status": "applied",
-            "approved_at": datetime.now(timezone.utc).isoformat(),
-            "submitted_at": datetime.now(timezone.utc).isoformat(),
-            "submission_reference": "Gmail SMTP accepted the message; delivery is not confirmed.",
-            "last_error": "",
-        },
+        body=completion,
         prefer="return=representation",
     )
     if not rows:
         logger.error(
             "Gmail accepted application email %s but status update returned no row (request %s)",
             application_id,
-            request.state.request_id,
+            request_id,
         )
         raise HTTPException(
             status_code=503,
             detail="Gmail accepted the email, but the application status could not be updated. Do not retry; check Gmail Sent and refresh the application.",
         )
     return _one(rows, "Email was accepted, but application status could not be updated.")
+
+
+@app.post("/api/applications/{application_id}/send")
+def send_approved_email(
+    application_id: str,
+    approval: ApprovedSend,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+    request: Request,
+):
+    return _send_application_email(
+        application_id,
+        user,
+        db,
+        request_id=request.state.request_id,
+        automatic=False,
+    )

@@ -12,6 +12,7 @@ type Job = {
   matched_title_keywords: string[];
   matched_description_keywords: string[];
   status: string;
+  resumes: { id: string; label: string; file_name: string } | null;
   job_listings: {
     title: string;
     company: string | null;
@@ -63,8 +64,15 @@ export default function JobsPage() {
             return <article className="job-card" key={job.id}>
               <div className="row-between"><span className="score-pill">{job.match_score} <small>points</small></span><span className={`badge ${job.status}`}>{job.status.replaceAll("_", " ")}</span></div>
               <h2>{listing.title}</h2><p className="muted">{listing.company || "Company not listed"}{listing.location ? ` · ${listing.location}` : ""}</p>
-              <p className="job-description">{listing.description || job.match_explanation}</p>
-              <div className="keyword-list">{[...job.matched_title_keywords, ...job.matched_description_keywords].slice(0, 7).map((keyword) => <span key={keyword}>{keyword}</span>)}</div>
+              <section className="match-reason"><strong>Why it matched</strong><p>{job.match_explanation || "This job met your resume and job-search matching criteria."}</p>{job.resumes && <small>Matched profile: {job.resumes.label}</small>}</section>
+              <div className="match-keywords">
+                {job.matched_title_keywords.length > 0 && <div><small>Title keywords</small><div className="keyword-list">{job.matched_title_keywords.map((keyword) => <span key={`title-${keyword}`}>{keyword}</span>)}</div></div>}
+                {job.matched_description_keywords.length > 0 && <div><small>Skills and description keywords</small><div className="keyword-list">{job.matched_description_keywords.map((keyword) => <span key={`description-${keyword}`}>{keyword}</span>)}</div></div>}
+              </div>
+              <details className="job-details">
+                <summary>Full job description and details</summary>
+                <p>{listing.description || "The listing did not provide a readable job description."}</p>
+              </details>
               <a className="inline-link job-source" href={listing.source_url} target="_blank" rel="noreferrer">View original listing <ExternalLink size={15} /></a>
             </article>;
           })}

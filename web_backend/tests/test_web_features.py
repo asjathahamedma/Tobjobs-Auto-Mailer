@@ -67,6 +67,43 @@ class WebFeatureTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "application/pdf")
         self.assertTrue(response.headers["content-disposition"].startswith("inline;"))
 
+    def test_deleting_resume_unlinks_matches_preserves_history_and_selects_replacement(self):
+        class FakeDatabase:
+            def __init__(self):
+                self.calls = []
+
+            def request(self, method, table, *, params=None, body=None, **kwargs):
+                self.calls.append((method, table, params, body))
+                if method == "GET" and table == "resumes" and params.get("id") == "eq.resume-1":
+                    return [{"id": "resume-1", "storage_path": "user-1/resume.pdf"}]
+                if method == "GET" and table == "resumes":
+                    return [{"id": "resume-2"}]
+                if method == "GET" and table == "user_settings":
+                    return [{"settings": {"selected_resume_id": "resume-1", "minimum_fit_score": 4}}]
+                if method == "DELETE" and table == "resumes":
+                    return [{"id": "resume-1"}]
+                return None
+
+            def storage_request(self, method, path):
+                self.storage_call = (method, path)
+                return SimpleNamespace(content=b"")
+
+        database = FakeDatabase()
+        result = api_main.delete_resume(
+            "resume-1",
+            AuthenticatedUser("user-1", "user@example.com", "access-token"),
+            database,
+        )
+        self.assertEqual(result, {"ok": True, "selected_resume_id": "resume-2"})
+        match_update = next(call for call in database.calls if call[1] == "job_matches")
+        self.assertEqual(match_update[2]["user_id"], "eq.user-1")
+        self.assertEqual(match_update[3], {"resume_id": None})
+        settings_update = next(call for call in database.calls if call[0] == "POST" and call[1] == "user_settings")
+        self.assertEqual(settings_update[3]["settings"], {"selected_resume_id": "resume-2", "minimum_fit_score": 4})
+        self.assertFalse(any(call[1] == "applications" for call in database.calls))
+        self.assertEqual(database.storage_call[0], "DELETE")
+        self.assertIn("private-resumes/user-1/resume.pdf", database.storage_call[1])
+
     def test_resume_keyword_reextraction_updates_only_keyword_fields(self):
         existing_profile = {
             "id": "resume-1",
@@ -112,6 +149,34 @@ class WebFeatureTests(unittest.TestCase):
         self.assertEqual(len(settings.category_urls), 1)
         with self.assertRaises(ValueError):
             SettingsUpdate(category_urls=["https://example.com/applicant/jobs"])
+        self.assertFalse(SettingsUpdate().auto_apply_enabled)
+
+    def test_auto_applications_require_saved_gmail_and_a_resume(self):
+        user = AuthenticatedUser("user-1", "user@example.com", "access-token")
+
+        class FakeDatabase:
+            def __init__(self, *, has_credentials, has_resume):
+                self.has_credentials = has_credentials
+                self.has_resume = has_resume
+                self.writes = []
+
+            def request(self, method, table, **kwargs):
+                if method == "GET" and table == "mailer_credentials":
+                    return [{"sender_email": "user@example.com"}] if self.has_credentials else []
+                if method == "GET" and table == "resumes":
+                    return [{"id": "resume-1"}] if self.has_resume else []
+                self.writes.append(table)
+                return None
+
+        for database, expected in [
+            (FakeDatabase(has_credentials=False, has_resume=True), "Gmail App Password"),
+            (FakeDatabase(has_credentials=True, has_resume=False), "resume profile"),
+        ]:
+            with self.assertRaises(HTTPException) as error:
+                api_main.update_user_settings(SettingsUpdate(auto_apply_enabled=True), user, database)
+            self.assertEqual(error.exception.status_code, 422)
+            self.assertIn(expected, error.exception.detail)
+            self.assertEqual(database.writes, [])
 
     def test_email_and_cover_letter_are_job_specific(self):
         content = generate_application_content(
@@ -275,6 +340,61 @@ class WebFeatureTests(unittest.TestCase):
         self.assertEqual(parsed_message.get_body(preferencelist=("plain",)).get_content().strip(), "Please review my application.")
         self.assertEqual(parsed_message.get_payload()[1].get_content_type(), "application/pdf")
         self.assertEqual(parsed_message.get_payload()[1].get_filename(), "resume.pdf")
+
+    def test_opted_in_automatic_email_uses_same_duplicate_guard_and_marks_authorization(self):
+        application = {
+            "id": "application-1",
+            "job_id": "job-1",
+            "status": "awaiting_review",
+            "generated_subject": "Application",
+            "generated_email": "Please review my application.",
+            "job_listings": {"title": "Developer", "company_email": "jobs@example.com"},
+        }
+
+        class FakeDatabase:
+            def __init__(self):
+                self.patches = []
+
+            def request(self, method, table, *, params=None, body=None, **kwargs):
+                if method == "GET" and table == "applications":
+                    return [application]
+                if method == "GET" and table == "job_matches":
+                    return [{"resumes": {"storage_path": "user-1/resume.pdf", "file_name": "resume.pdf"}}]
+                if method == "GET" and table == "mailer_credentials":
+                    return [{"sender_email": "applicant@example.com", "encrypted_app_password": "encrypted"}]
+                if method == "GET" and table == "user_settings":
+                    return []
+                if method == "PATCH" and table == "applications":
+                    self.patches.append((params, body))
+                    return [{"id": "application-1", "status": body["status"], **body}]
+                raise AssertionError(f"Unexpected database request: {method} {table}")
+
+            def storage_request(self, method, path):
+                return SimpleNamespace(content=b"%PDF-1.4 test resume")
+
+        database = FakeDatabase()
+        smtp = MagicMock()
+        smtp.__enter__.return_value = smtp
+        smtp.sendmail.return_value = {}
+        with (
+            patch.object(api_main.smtplib, "SMTP_SSL", return_value=smtp),
+            patch.object(api_main, "_require_encryption", return_value=SimpleNamespace(
+                decrypt=lambda _: b"gmail-app-password",
+            )),
+        ):
+            result = api_main._send_application_email(
+                "application-1",
+                AuthenticatedUser("user-1", "applicant@example.com", "access-token"),
+                database,
+                request_id="search-run-1",
+                automatic=True,
+            )
+
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(database.patches[0][0]["status"], "eq.awaiting_review")
+        self.assertIsNone(database.patches[-1][1]["approved_at"])
+        self.assertIn("Automatically authorized", database.patches[-1][1]["submission_reference"])
+        smtp.sendmail.assert_called_once()
 
     def test_sending_application_cannot_be_submitted_twice(self):
         class FakeDatabase:

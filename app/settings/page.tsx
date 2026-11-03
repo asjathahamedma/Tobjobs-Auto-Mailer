@@ -1,9 +1,10 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useState } from "react";
-import { BookOpen, Check, CircleAlert, Eye, FileUp, LoaderCircle, Save, Sparkles, X } from "lucide-react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { BookOpen, CircleAlert, Eye, FileUp, LoaderCircle, Plus, Save, Sparkles, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api, apiBlob, jsonBody } from "@/lib/api";
+import { Toast } from "@/components/Toast";
 
 type Settings = {
   display_name: string;
@@ -20,6 +21,7 @@ type Settings = {
   minimum_fit_score: number;
   require_remote: boolean;
   enable_ocr_for_ad_images: boolean;
+  auto_apply_enabled: boolean;
   category_urls: string[];
   selected_resume_id: string | null;
   mailer_configured: boolean;
@@ -31,6 +33,7 @@ const initial: Settings = {
   display_name: "", your_name: "", contact_email: "", phone: "", portfolio: "", linkedin: "", github: "",
   preferred_titles: [], preferred_locations: [], employment_preferences: [], recent_job_window_days: 2,
   minimum_fit_score: 4, require_remote: false, enable_ocr_for_ad_images: false,
+  auto_apply_enabled: false,
   category_urls: ["https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=HNS&jst=OPEN", "https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=SDQ&jst=OPEN"],
   selected_resume_id: null, mailer_configured: false,
 };
@@ -46,6 +49,7 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
+  const uploadInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => {
@@ -183,16 +187,36 @@ export default function SettingsPage() {
     }
   }
 
+  async function deleteResume(resume: Resume) {
+    if (!window.confirm(`Delete "${resume.label}" and its private PDF? Applications will be kept, but job matches will no longer link to this resume.`)) return;
+    setBusy(`delete:${resume.id}`);
+    setError("");
+    try {
+      const result = await api<{ selected_resume_id: string | null }>(`/api/resumes/${resume.id}`, { method: "DELETE" });
+      setResumes((current) => current.filter((item) => item.id !== resume.id));
+      setSettings((current) => ({ ...current, selected_resume_id: result.selected_resume_id }));
+      setNotice(`Deleted ${resume.label}. Application history was preserved.`);
+      if (preview?.id === resume.id) setPreview(null);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "Could not delete this resume profile.";
+      await refresh();
+      setError(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   if (loading) return <AppShell><div className="loading-state">Loading settings…</div></AppShell>;
 
   return (
     <AppShell>
       <header className="page-header"><div><p className="eyebrow">PERSONALIZE YOUR SEARCH</p><h1>Settings and profile</h1><p className="muted">Your resume is stored in a private account folder and used to find relevant job listings.</p></div></header>
       {error && <div className="notice error"><CircleAlert size={18} />{error}</div>}
-      {notice && <div className="notice success"><Check size={18} />{notice}</div>}
+      <Toast message={notice} onDismiss={() => setNotice("")} />
       <div className="settings-layout">
-        <section className="panel settings-section"><div className="section-heading"><div><h2>Resume profiles</h2><p className="muted">Upload a text-based PDF (up to 10 MB). Scanned images are not supported yet.</p></div></div>
-          <label className="upload-zone"><FileUp size={22} /><span>{busy === "resume" ? "Uploading and analyzing…" : "Choose one or more PDF resumes"}</span><input type="file" accept="application/pdf,.pdf" multiple onChange={uploadResume} disabled={busy === "resume"} /></label>
+        <section className="panel settings-section"><div className="section-heading"><div><h2>Resume profiles</h2><p className="muted">Upload a text-based PDF (up to 10 MB). Scanned images are not supported yet.</p></div><button className="button secondary" type="button" onClick={() => uploadInput.current?.click()} disabled={busy === "resume"}><Plus size={16} />Add profile</button></div>
+          <input ref={uploadInput} className="resume-upload-input" type="file" accept="application/pdf,.pdf" multiple onChange={uploadResume} disabled={busy === "resume"} />
+          {busy === "resume" && <p className="muted">Uploading and analyzing selected resume files…</p>}
           {resumes.length > 0 && <label>Profile used for matching<select value={settings.selected_resume_id || ""} onChange={(event) => setField("selected_resume_id", event.target.value || null)}>{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.label}</option>)}</select></label>}
           {resumes.map((resume) => <div className="resume-profile-editor" key={resume.id}>
             <div className="resume-row"><FileUp size={17} /><div><strong>{resume.label}</strong><small>{resume.file_name}</small></div><span>{busy === `profile:${resume.id}` ? "Saving…" : "Edit inferred profile"}</span></div>
@@ -202,6 +226,9 @@ export default function SettingsPage() {
               </button>
               <button className="button secondary" type="button" onClick={() => void extractKeywords(resume.id)} disabled={busy === `keywords:${resume.id}`}>
                 {busy === `keywords:${resume.id}` ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />}Extract keywords
+              </button>
+              <button className="button danger" type="button" onClick={() => void deleteResume(resume)} disabled={busy === `delete:${resume.id}`}>
+                {busy === `delete:${resume.id}` ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}Delete profile
               </button>
             </div>
             <label>Profile name<input defaultValue={resume.label} onBlur={(event) => { if (event.target.value !== resume.label) void saveResume(resume.id, { label: event.target.value }); }} /></label>
@@ -233,6 +260,10 @@ export default function SettingsPage() {
         </div>
           <label className="check-label"><input type="checkbox" checked={settings.require_remote} onChange={(event) => setField("require_remote", event.target.checked)} />Only include roles explicitly marked remote</label>
           <label className="check-label"><input type="checkbox" checked={settings.enable_ocr_for_ad_images} onChange={(event) => setField("enable_ocr_for_ad_images", event.target.checked)} />Enable OCR for image-based job adverts (slower)</label>
+          <div className="auto-apply-option">
+            <label className="check-label"><input type="checkbox" checked={settings.auto_apply_enabled} onChange={(event) => setField("auto_apply_enabled", event.target.checked)} />Automatically email applications for new matching jobs</label>
+            <p className="muted">When enabled, the app sends a generated email with the matched resume to a valid listing email address for each newly discovered job that passes your current matching filters. This sends without per-job review and does not submit website forms. It is off by default, requires a saved Gmail App Password and resume, and will not automatically retry failed or uncertain sends. Review your profile, resume, and Gmail settings before enabling.</p>
+          </div>
         </section>
         <section className="panel settings-section"><h2>TopJobs categories</h2><p className="muted">One HTTPS TopJobs applicant category URL per line.</p><label>Category URLs<textarea rows={4} value={settings.category_urls.join("\n")} onChange={(event) => setField("category_urls", event.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} /></label></section>
         <section className="panel settings-section"><div className="section-heading"><div><h2>Gmail sending</h2><p className="muted">{settings.mailer_configured ? "An App Password is saved. It is never displayed here." : "Connect Gmail with an App Password; your normal Gmail password is not accepted."}</p></div><BookOpen size={20} /></div>

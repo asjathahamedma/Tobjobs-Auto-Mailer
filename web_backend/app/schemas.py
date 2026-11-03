@@ -29,6 +29,7 @@ class SettingsUpdate(BaseModel):
     minimum_fit_score: int = Field(default=4, ge=0, le=100)
     require_remote: bool = False
     enable_ocr_for_ad_images: bool = False
+    auto_apply_enabled: bool = False
     category_urls: list[str] = Field(
         default_factory=lambda: [
             "https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=HNS&jst=OPEN",

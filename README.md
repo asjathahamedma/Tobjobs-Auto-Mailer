@@ -5,7 +5,7 @@ A web-only job-search workspace for TopJobs.lk. It uses Next.js for the website,
 ## What is included
 
 - Email/password registration and sign-in using Supabase Auth; no Google OAuth.
-- User-scoped settings, multiple private PDF resume profiles with authenticated preview and keyword extraction, and RLS-protected job, search, and application records.
+- User-scoped settings, manageable private PDF resume profiles with authenticated preview and keyword extraction, and RLS-protected job, search, and application records.
 - TopJobs.lk category and advert scraping with existing weighted keyword matching.
 - Dashboard with recent runs, matched jobs, and a match rate based on jobs reviewed in the most recent 1,000 runs. A fit score is raw points, not a hiring probability.
 - Editable email and cover-letter drafts; the resume is attached only after checking the explicit approval box and choosing **Send approved email**.
@@ -100,9 +100,11 @@ Production search requests are stored in Supabase and sent to Vercel Queues. The
 
 Confirm TopJobs.lk's applicable terms and rate limits before using the scraper. The parser can also need maintenance if the site changes. Free provider plans, quotas, sleep behavior, and availability can change; public hosting is not guaranteed to remain free.
 
-## Gmail App Password
+## Gmail App Password and automatic applications
 
-In Settings, follow the in-app guide: enable Google 2-Step Verification, create a Gmail App Password at [Google App Passwords](https://myaccount.google.com/apppasswords), and save it with the sender address. A normal Gmail password is not accepted. The API encrypts the saved App Password; Google SMTP must still accept the sign-in. Each email is sent only after the user checks the approval box. The attached resume is the private PDF selected for that job match.
+In Settings, follow the in-app guide: enable Google 2-Step Verification, create a Gmail App Password at [Google App Passwords](https://myaccount.google.com/apppasswords), and save it with the sender address. A normal Gmail password is not accepted. The API encrypts the saved App Password; Google SMTP must still accept the sign-in.
+
+Automatic applications are off by default. If explicitly enabled in Settings, the app sends a generated email with the matched private resume to a valid contact email on each newly discovered matching TopJobs listing. This does not submit external website forms. Existing applications are not automatically retried, and uncertain send outcomes remain locked to avoid duplicates. Check the recipient, resume, and generated application content before enabling the setting. When automatic applications are off, each email still requires the explicit approval checkbox on the Applications page. Gmail acceptance does not confirm delivery.
 
 ## Data and migration from the old desktop app
 

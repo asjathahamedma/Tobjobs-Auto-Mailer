@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, CircleAlert, FileText, LoaderCircle, MailCheck, WandSparkles } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api, jsonBody } from "@/lib/api";
+import { Toast } from "@/components/Toast";
 
 type Application = {
   id: string;
@@ -84,7 +85,7 @@ export default function ApplicationsPage() {
     <AppShell>
       <header className="page-header"><div><p className="eyebrow">APPLICATION PIPELINE</p><h1>Review applications</h1><p className="muted">Draft emails and cover letters are editable. Sending always requires your explicit approval.</p></div></header>
       {error && <div className="notice error"><CircleAlert size={18} />{error}</div>}
-      {notice && <div className="notice success"><Check size={18} />{notice}</div>}
+      <Toast message={notice} onDismiss={() => setNotice("")} />
       {items.length === 0 ? <div className="panel empty-state"><FileText size={28} /><strong>No applications to review</strong><p>Run a job search to create review drafts for matching roles.</p></div> : <div className="application-list">
         {items.map((item) => <article className="panel application-card" key={item.id}>
           <div className="section-heading"><div><span className={`badge ${item.status}`}>{item.status.replaceAll("_", " ")}</span><h2>{item.job_listings.title}</h2><p className="muted">{item.job_listings.company || "Company not listed"}</p><p className="muted">Application email: {item.job_listings.company_email || "No email address found"}</p></div><a className="inline-link" target="_blank" rel="noreferrer" href={item.job_listings.source_url}>Original listing ↗</a></div>
