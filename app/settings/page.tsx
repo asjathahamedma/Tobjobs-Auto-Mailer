@@ -28,7 +28,20 @@ type Settings = {
   selected_resume_id: string | null;
   mailer_configured: boolean;
 };
-type Resume = { id: string; file_name: string; label: string; summary: string; title_keywords: string[]; description_keywords: string[] };
+type Resume = {
+  id: string;
+  file_name: string;
+  label: string;
+  summary: string;
+  title_keywords: string[];
+  description_keywords: string[];
+  target_roles?: string[];
+  seniority_level?: string;
+  years_experience?: number;
+  core_skills?: string[];
+  domains?: string[];
+};
+type AIUsage = { date: string; providers: Record<string, { input_tokens: number; output_tokens: number }> };
 type SettingsResponse = Settings & { profile: { display_name: string } };
 
 const initial: Settings = {
@@ -45,6 +58,7 @@ const split = (value: string) => value.split(",").map((part) => part.trim()).fil
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(initial);
   const [resumes, setResumes] = useState<Resume[]>([]);
+  const [aiUsage, setAiUsage] = useState<AIUsage>({ date: "", providers: {} });
   const [senderEmail, setSenderEmail] = useState("");
   const [appPassword, setAppPassword] = useState("");
   const [loading, setLoading] = useState(true);
@@ -62,13 +76,15 @@ export default function SettingsPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [saved, resumePage] = await Promise.all([
+      const [saved, resumePage, usage] = await Promise.all([
         api<SettingsResponse>("/api/settings"),
         api<Resume[]>("/api/resumes"),
+        api<AIUsage>("/api/ai-usage"),
       ]);
       const { mailer_configured, profile, ...stored } = saved;
       setSettings({ ...initial, ...stored, display_name: stored.display_name || profile.display_name, mailer_configured });
       setResumes(resumePage);
+      setAiUsage(usage);
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not load settings.");
@@ -238,6 +254,8 @@ export default function SettingsPage() {
             <label>Profile summary<textarea rows={2} defaultValue={resume.summary} onBlur={(event) => { if (event.target.value !== resume.summary) void saveResume(resume.id, { summary: event.target.value }); }} /></label>
             <label>Title keywords <small>Comma-separated; used to compare job titles</small><input defaultValue={resume.title_keywords.join(", ")} onBlur={(event) => { if (event.target.value !== resume.title_keywords.join(", ")) void saveResume(resume.id, { title_keywords: split(event.target.value) }); }} /></label>
             <label>Description keywords <small>Comma-separated; used to compare advert text</small><input defaultValue={resume.description_keywords.join(", ")} onBlur={(event) => { if (event.target.value !== resume.description_keywords.join(", ")) void saveResume(resume.id, { description_keywords: split(event.target.value) }); }} /></label>
+            <p className="muted">Detected roles: {(resume.target_roles || []).join(", ") || "Not detected"} · Seniority: {resume.seniority_level || "unspecified"}{resume.years_experience ? ` · ${resume.years_experience} years explicitly mentioned` : ""}</p>
+            {(resume.core_skills || []).length > 0 && <p className="muted">Detected skills: {resume.core_skills?.join(", ")}</p>}
           </div>)}
         </section>
         {preview && <div className="resume-preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreview(null); }}>
@@ -281,9 +299,14 @@ export default function SettingsPage() {
             ))}
           </div>
           <div className="progress-card" style={{ marginTop: "1rem" }}>
-            <div className="row-between"><strong>Today&apos;s AI usage</strong><span>Groq / Gemini</span></div>
-            <p className="muted">Usage is tracked per provider and the UI shows the currently configured per-provider daily budgets and minute limits.</p>
-            <div className="match-keywords"><span>Groq: 0 / 200k tokens</span><span>Gemini: 0 / 500k tokens</span></div>
+            <div className="row-between"><strong>Today&apos;s AI usage</strong><span>{aiUsage.date || "UTC"}</span></div>
+            <p className="muted">Provider token totals recorded for your account today (UTC).</p>
+            <div className="match-keywords">
+              {["groq", "gemini"].map((provider) => {
+                const usage = aiUsage.providers[provider] || { input_tokens: 0, output_tokens: 0 };
+                return <span key={provider}>{provider}: {(usage.input_tokens + usage.output_tokens).toLocaleString()} tokens</span>;
+              })}
+            </div>
           </div>
         </section>
         <section className="panel settings-section"><h2>TopJobs categories</h2><p className="muted">One HTTPS TopJobs applicant category URL per line.</p><label>Category URLs<textarea rows={4} value={settings.category_urls.join("\n")} onChange={(event) => setField("category_urls", event.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} /></label></section>

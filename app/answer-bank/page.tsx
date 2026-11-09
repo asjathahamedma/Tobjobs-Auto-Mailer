@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Save } from "lucide-react";
+import { Pencil, Plus, Save, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { api, jsonBody } from "@/lib/api";
 
@@ -21,6 +21,8 @@ export default function AnswerBankPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState(emptyEntry);
 
   const load = useCallback(async () => {
     try {
@@ -55,6 +57,35 @@ export default function AnswerBankPage() {
       setError(reason instanceof Error ? reason.message : "Could not save answer.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function updateEntry(id: string) {
+    setSaving(true);
+    setError("");
+    try {
+      const payload = {
+        question: editDraft.question.trim(),
+        answer: editDraft.answer.trim(),
+        tags: editDraft.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      };
+      const saved = await api<AnswerEntry>(`/api/answer-bank/${id}`, { method: "PATCH", body: jsonBody(payload) });
+      setEntries((current) => current.map((entry) => entry.id === id ? saved : entry));
+      setEditingId(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not update answer.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteEntry(id: string) {
+    if (!window.confirm("Delete this saved answer?")) return;
+    try {
+      await api(`/api/answer-bank/${id}`, { method: "DELETE" });
+      setEntries((current) => current.filter((entry) => entry.id !== id));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not delete answer.");
     }
   }
 
@@ -110,9 +141,26 @@ export default function AnswerBankPage() {
               <article key={entry.id} className="panel" style={{ padding: 16, background: "#fafcff" }}>
                 <div className="row-between" style={{ marginBottom: 10 }}>
                   <strong>{entry.question}</strong>
-                  {entry.is_default && <span className="badge completed">default</span>}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {entry.is_default && <span className="badge completed">default</span>}
+                    <button className="button secondary" onClick={() => {
+                      setEditingId(entry.id);
+                      setEditDraft({ question: entry.question, answer: entry.answer, tags: entry.tags.join(", ") });
+                    }} aria-label="Edit answer"><Pencil size={15} />Edit</button>
+                    <button className="button secondary" onClick={() => void deleteEntry(entry.id)} aria-label="Delete answer"><Trash2 size={15} /></button>
+                  </div>
                 </div>
-                <p style={{ margin: 0, color: "#4c5a71", lineHeight: 1.7 }}>{entry.answer}</p>
+                {editingId === entry.id ? (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    <input aria-label="Edit question" value={editDraft.question} onChange={(event) => setEditDraft((current) => ({ ...current, question: event.target.value }))} style={{ border: "1px solid #e7ebf1", borderRadius: 8, padding: "10px 12px" }} />
+                    <textarea aria-label="Edit answer" rows={5} value={editDraft.answer} onChange={(event) => setEditDraft((current) => ({ ...current, answer: event.target.value }))} style={{ border: "1px solid #e7ebf1", borderRadius: 8, padding: "10px 12px" }} />
+                    <input aria-label="Edit tags" value={editDraft.tags} onChange={(event) => setEditDraft((current) => ({ ...current, tags: event.target.value }))} style={{ border: "1px solid #e7ebf1", borderRadius: 8, padding: "10px 12px" }} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button className="button primary" disabled={saving} onClick={() => void updateEntry(entry.id)}>{saving ? "Saving…" : "Save changes"}</button>
+                      <button className="button secondary" onClick={() => setEditingId(null)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : <p style={{ margin: 0, color: "#4c5a71", lineHeight: 1.7 }}>{entry.answer}</p>}
                 {entry.tags.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
                     {entry.tags.map((tag) => <span key={`${entry.id}-${tag}`} className="badge" style={{ background: "#edf2ff", color: "#4965be" }}>{tag}</span>)}

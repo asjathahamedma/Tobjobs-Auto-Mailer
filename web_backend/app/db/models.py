@@ -142,8 +142,15 @@ class BotProfile(Base):
     )
     name: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
     role: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    headline: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
     summary: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     target_roles: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    include_keywords: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    exclude_keywords: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
     strengths: Mapped[list[str]] = mapped_column(
@@ -152,8 +159,14 @@ class BotProfile(Base):
     preferred_locations: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    seniority_level: Mapped[str] = mapped_column(String(40), nullable=False, server_default="mid")
+    years_experience: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    domains: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     remote_preference: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     daily_apply_cap: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
+    min_match_score: Mapped[int] = mapped_column(Integer, nullable=False, server_default="4")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

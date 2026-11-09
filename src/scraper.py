@@ -246,6 +246,7 @@ def analyze_job_fit(
     profiles=None,
     minimum_fit_score=None,
     require_remote=None,
+    preferred_locations=None,
     excluded_title_keywords=None,
     excluded_seniority_keywords=None,
     level_keywords=None,
@@ -253,11 +254,26 @@ def analyze_job_fit(
     """Scores a job against your profiles using title and ad content."""
     normalized_title = normalize_text(job_title)
 
-    if (REQUIRE_REMOTE if require_remote is None else require_remote) and " remote " not in f" {normalized_title} ":
+    combined_text = " ".join(part for part in [job_title, visible_text, ocr_text] if part).strip()
+    normalized_combined_text = normalize_text(combined_text)
+
+    if (REQUIRE_REMOTE if require_remote is None else require_remote) and " remote " not in f" {normalized_combined_text} ":
         return {
             "is_match": False,
             "skip_reason": "remote_required",
             "fit_feedback": "Skipped because remote-only mode is enabled.",
+        }
+
+    locations = preferred_locations or []
+    location_hits = [
+        location for location in locations
+        if normalize_text(location) and f" {normalize_text(location)} " in f" {normalized_combined_text} "
+    ]
+    if locations and not location_hits:
+        return {
+            "is_match": False,
+            "skip_reason": "location_mismatch",
+            "fit_feedback": "Skipped because the job description did not mention a preferred location.",
         }
 
     excluded_hits = find_keyword_hits(
@@ -282,7 +298,6 @@ def analyze_job_fit(
             "fit_feedback": f"Skipped because the title looks too senior: {', '.join(seniority_hits)}.",
         }
 
-    combined_text = " ".join(part for part in [job_title, visible_text, ocr_text] if part).strip()
     level_hits = find_keyword_hits(
         job_title,
         LEVEL_KEYWORDS if level_keywords is None else level_keywords,

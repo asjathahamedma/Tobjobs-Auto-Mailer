@@ -93,45 +93,20 @@ def _infer_years_experience(text: str) -> int:
     return 0
 
 
-def _infer_seniority_level(text: str, years_experience: int) -> str:
-    if "manager" in text.lower() or "director" in text.lower():
-        return "manager/director"
-    if "lead" in text.lower() or "principal" in text.lower():
-        return "lead/principal"
-    if years_experience >= 8:
-        return "senior"
-    if years_experience >= 4:
-        return "mid"
-    if years_experience >= 2:
-        return "junior/entry"
-    return "intern/trainee"
+def _infer_seniority_level(text: str) -> str:
+    explicit_levels = re.findall(
+        r"\b(intern|trainee|junior|entry[- ]level|mid[- ]level|senior|lead|principal|manager|director)\b",
+        text.lower(),
+    )
+    return explicit_levels[0] if explicit_levels else "unspecified"
 
 
-def _infer_target_roles(text: str, title_keywords: list[str]) -> list[str]:
-    found: list[str] = []
-    for keyword in ADDITIONAL_TITLE_KEYWORDS:
-        if keyword.lower() in text.lower() and keyword not in found:
-            found.append(keyword)
-    for keyword in title_keywords:
-        if keyword not in found:
-            found.append(keyword)
-    return found[:5]
+def _infer_target_roles(title_keywords: list[str]) -> list[str]:
+    return title_keywords[:5]
 
 
-def _infer_domains(text: str, description_keywords: list[str]) -> list[str]:
-    domains = []
-    lowered = text.lower()
-    if any(term in lowered for term in ["react", "frontend", "ui", "ux", "css", "html", "javascript", "typescript"]):
-        domains.append("frontend")
-    if any(term in lowered for term in ["python", "node", "api", "backend", "database", "sql", "fastapi", "django", "express"]):
-        domains.append("backend")
-    if any(term in lowered for term in ["data", "sql", "pandas", "spark", "warehouse", "etl", "analytics", "machine learning"]):
-        domains.append("data")
-    if any(term in lowered for term in ["aws", "azure", "gcp", "kubernetes", "docker", "terraform", "devops"]):
-        domains.append("cloud/devops")
-    if not domains:
-        domains = list(dict.fromkeys(description_keywords[:3]))
-    return domains[:5]
+def _infer_domains(description_keywords: list[str]) -> list[str]:
+    return list(dict.fromkeys(description_keywords[:5]))
 
 
 def build_resume_profile(text: str, file_name: str) -> dict:
@@ -157,10 +132,10 @@ def build_resume_profile(text: str, file_name: str) -> dict:
         summary = f"Resume profile based on the detected skills: {', '.join(detected_keywords[:4]) or name}."
 
     years_experience = _infer_years_experience(text)
-    seniority_level = _infer_seniority_level(text, years_experience)
-    target_roles = _infer_target_roles(text, title_keywords)
+    seniority_level = _infer_seniority_level(text)
+    target_roles = _infer_target_roles(title_keywords)
     core_skills = list(dict.fromkeys(description_keywords[:8]))
-    domains = _infer_domains(text, description_keywords)
+    domains = _infer_domains(description_keywords)
     return {
         "label": template.get("label") if score else name or "Resume profile",
         "summary": summary,

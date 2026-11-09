@@ -21,8 +21,15 @@ def _profile_map(profiles):
             "label": profile.get("label", "Resume profile"),
             "resume_path": "",
             "summary": profile.get("summary", ""),
-            "title_keywords": profile.get("title_keywords") or [],
-            "description_keywords": profile.get("description_keywords") or [],
+            "title_keywords": list(dict.fromkeys(
+                (profile.get("title_keywords") or []) + (profile.get("target_roles") or [])
+            )),
+            "description_keywords": list(dict.fromkeys(
+                (profile.get("description_keywords") or [])
+                + (profile.get("include_keywords") or [])
+                + (profile.get("core_skills") or [])
+                + (profile.get("strengths") or [])
+            )),
         }
     return output
 
@@ -117,6 +124,9 @@ def run_topjobs_search(settings, profiles, previously_applied, on_job, on_progre
                 profiles=profile_map,
                 minimum_fit_score=settings["minimum_fit_score"],
                 require_remote=settings.get("require_remote", False),
+                excluded_title_keywords=settings.get("exclude_keywords", []),
+                excluded_seniority_keywords=[],
+                level_keywords=[],
             )
             record = {
                 "source": "topjobs.lk",

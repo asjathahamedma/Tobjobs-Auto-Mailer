@@ -6,10 +6,12 @@ import re
 import time
 from collections import defaultdict, deque
 from threading import Lock
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 import requests
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from web_backend.app.settings import get_settings
 
 AI_CACHE: dict[str, Any] = {}
 AI_PROVIDER_THROTTLES: dict[str, deque[tuple[float, int]]] = defaultdict(deque)
@@ -63,7 +65,7 @@ def hash_task_input(task_name: str, input_data: Any) -> str:
 
 
 def get_provider_order() -> list[str]:
-    raw = os.getenv("AI_PROVIDER_ORDER", "groq,gemini").strip()
+    raw = get_settings().ai_provider_order.strip()
     providers = [part.strip().lower() for part in raw.split(",") if part.strip()]
     if not providers:
         return ["groq", "gemini"]
@@ -71,16 +73,28 @@ def get_provider_order() -> list[str]:
 
 
 def _provider_api_key(provider: str) -> str:
-    env_key = "GROQ_API_KEY" if provider == "groq" else "GEMINI_API_KEY"
-    key = os.getenv(env_key, "").strip()
+    if provider == "groq":
+        env_key = "GROQ_API_KEY"
+        key = get_settings().groq_api_key.strip()
+    elif provider == "gemini":
+        env_key = "GEMINI_API_KEY"
+        key = get_settings().gemini_api_key.strip()
+    else:
+        raise AIProviderError(f"Unsupported AI provider: {provider}")
     if not key:
         raise AIProviderError(f"{env_key} is not configured on the server.")
     return key
 
 
 def _provider_model(provider: str) -> str:
-    env_key = "GROQ_MODEL" if provider == "groq" else "GEMINI_MODEL"
-    model = os.getenv(env_key, "").strip()
+    if provider == "groq":
+        env_key = "GROQ_MODEL"
+        model = get_settings().groq_model.strip()
+    elif provider == "gemini":
+        env_key = "GEMINI_MODEL"
+        model = get_settings().gemini_model.strip()
+    else:
+        raise AIProviderError(f"Unsupported AI provider: {provider}")
     if not model:
         if provider == "groq":
             return "llama-3.3-70b-versatile"
@@ -208,15 +222,24 @@ def _validate_json_response(content: str, schema: type[T] | Any) -> T:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
         raise AIValidationError("Invalid JSON response from AI provider.") from exc
-    if isinstance(schema, type) and issubclass(schema, BaseModel):
-        return schema.model_validate(payload)
-    return TypeAdapter(schema).validate_python(payload)
+    try:
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            return schema.model_validate(payload)
+        return TypeAdapter(schema).validate_python(payload)
+    except ValidationError as exc:
+        raise AIValidationError("AI response did not match the requested schema.") from exc
 
 
-def _run_single_provider(task_name: str, system_prompt: str, input_data: Any, schema: type[T] | Any, provider: str) -> T:
+def _run_single_provider(
+    task_name: str,
+    system_prompt: str,
+    input_data: Any,
+    schema: type[T] | Any,
+    provider: str,
+) -> tuple[T, dict[str, Any]]:
     response = _request_provider_completion(provider, system_prompt, task_name, input_data)
     try:
-        return _validate_json_response(response["content"], schema)
+        return _validate_json_response(response["content"], schema), response
     except AIValidationError:
         repair_prompt = (
             "The previous response was not valid JSON or did not conform to the schema. "
@@ -225,12 +248,28 @@ def _run_single_provider(task_name: str, system_prompt: str, input_data: Any, sc
             f"Requested schema: {getattr(schema, 'model_json_schema', lambda: schema)() if isinstance(schema, type) and hasattr(schema, 'model_json_schema') else schema}"
         )
         repair_response = _request_provider_completion(provider, repair_prompt, task_name, {"invalid_response": response["content"], "input": input_data})
-        return _validate_json_response(repair_response["content"], schema)
+        result = _validate_json_response(repair_response["content"], schema)
+        usage = {
+            **repair_response,
+            "input_tokens": response["input_tokens"] + repair_response["input_tokens"],
+            "output_tokens": response["output_tokens"] + repair_response["output_tokens"],
+            "latency_ms": response["latency_ms"] + repair_response["latency_ms"],
+        }
+        return result, usage
 
 
-def run_structured_task(task_name: str, system_prompt: str, input_data: Any, schema: type[T] | Any, *, user_id: str | None = None, provider_order: list[str] | None = None) -> T:
+def run_structured_task(
+    task_name: str,
+    system_prompt: str,
+    input_data: Any,
+    schema: type[T] | Any,
+    *,
+    user_id: str | None = None,
+    provider_order: list[str] | None = None,
+    usage_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> T:
     safe_input = redact_contact_details(json.dumps(input_data, ensure_ascii=False, sort_keys=True))
-    cache_key = hash_task_input(task_name, safe_input)
+    cache_key = hash_task_input(task_name, {"user_id": user_id, "input": safe_input})
 
     with AI_CACHE_LOCK:
         cached = AI_CACHE.get(cache_key)
@@ -242,7 +281,9 @@ def run_structured_task(task_name: str, system_prompt: str, input_data: Any, sch
     for provider in providers:
         for attempt in range(2):
             try:
-                result = _run_single_provider(task_name, system_prompt, safe_input, schema, provider)
+                result, usage = _run_single_provider(task_name, system_prompt, safe_input, schema, provider)
+                if usage_callback:
+                    usage_callback({**usage, "task": task_name, "user_id": user_id, "status": "success"})
                 with AI_CACHE_LOCK:
                     AI_CACHE[cache_key] = result
                 return result

@@ -145,26 +145,58 @@ class ProfileUpdate(BaseModel):
     full_name: str = Field(default="", max_length=120)
     headline: str = Field(default="", max_length=200)
     summary: str = Field(default="", max_length=5000)
-    target_roles: list[str] = Field(default_factory=list)
-    seniority_level: str = Field(default="mid", max_length=40)
+    target_roles: list[str] = Field(default_factory=list, max_length=30)
+    include_keywords: list[str] = Field(default_factory=list, max_length=60)
+    exclude_keywords: list[str] = Field(default_factory=list, max_length=60)
+    seniority_level: str = Field(default="unspecified", max_length=40)
     years_experience: int = Field(default=0, ge=0, le=60)
-    domains: list[str] = Field(default_factory=list)
-    preferred_locations: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list, max_length=30)
+    preferred_locations: list[str] = Field(default_factory=list, max_length=20)
     remote_preference: bool = False
     daily_apply_cap: int = Field(default=5, ge=1, le=50)
+    min_match_score: int = Field(default=4, ge=0, le=100)
     active: bool = True
-    strengths: list[str] = Field(default_factory=list)
+    strengths: list[str] = Field(default_factory=list, max_length=60)
 
-    @field_validator("target_roles", "domains", "preferred_locations", "strengths")
+    @field_validator("target_roles", "include_keywords", "exclude_keywords", "domains", "preferred_locations", "strengths")
     @classmethod
     def clean_profile_lists(cls, values: list[str]) -> list[str]:
         cleaned = [value.strip() for value in values if value.strip()]
+        if any(len(value) > 150 for value in cleaned):
+            raise ValueError("Each profile item must be 150 characters or fewer.")
+        return list(dict.fromkeys(cleaned))
+
+
+class EducationEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    school: str = Field(min_length=1, max_length=200)
+    degree: str = Field(default="", max_length=150)
+    field_of_study: str = Field(default="", max_length=150)
+    start_year: int | None = Field(default=None, ge=1900, le=2100)
+    end_year: int | None = Field(default=None, ge=1900, le=2100)
+    notes: str = Field(default="", max_length=5000)
+
+
+class WorkExperienceEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    company: str = Field(min_length=1, max_length=200)
+    role: str = Field(min_length=1, max_length=150)
+    start_date: str = Field(default="", max_length=20)
+    end_date: str = Field(default="", max_length=20)
+    summary: str = Field(default="", max_length=5000)
+    achievements: list[str] = Field(default_factory=list, max_length=30)
+
+    @field_validator("achievements")
+    @classmethod
+    def clean_achievements(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
+        if any(len(value) > 500 for value in cleaned):
+            raise ValueError("Each achievement must be 500 characters or fewer.")
         return list(dict.fromkeys(cleaned))
 
 
 class AnswerBankEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    id: str | None = None
     question: str = Field(min_length=3, max_length=500)
     answer: str = Field(min_length=1, max_length=8000)
     tags: list[str] = Field(default_factory=list)
@@ -175,3 +207,16 @@ class AnswerBankEntry(BaseModel):
     def clean_tags(cls, values: list[str]) -> list[str]:
         cleaned = [value.strip() for value in values if value.strip()]
         return list(dict.fromkeys(cleaned))
+
+
+class ApplicationEventCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_type: str = Field(default="note", min_length=1, max_length=50)
+    details: str = Field(min_length=1, max_length=5000)
+
+
+class ApplicationDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subject: str = Field(min_length=1, max_length=300)
+    email: str = Field(min_length=1, max_length=20000)
+    cover_letter: str = Field(min_length=1, max_length=30000)

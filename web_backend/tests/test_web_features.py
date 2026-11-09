@@ -44,32 +44,39 @@ class WebFeatureTests(unittest.TestCase):
         self.assertLessEqual(len(profile["title_keywords"]), 30)
         self.assertLessEqual(len(profile["description_keywords"]), 60)
 
-    def test_profile_and_answer_bank_store_in_user_settings(self):
+    def test_profile_and_answer_bank_use_user_scoped_tables(self):
         class FakeDatabase:
             def request(self, method, table, *, params=None, body=None, **kwargs):
-                if method == "GET" and table == "user_settings":
-                    return [{"settings": {"profile": {"full_name": "Ava"}, "answer_bank": [{"id": "existing", "question": "Q", "answer": "A", "tags": ["intro"]}]}}]
-                if method == "POST" and table == "user_settings":
-                    self.saved = body
-                    return [{"settings": body["settings"]}]
+                self.calls = getattr(self, "calls", [])
+                self.calls.append((method, table, params, body))
+                if method == "GET" and table == "bot_profiles":
+                    return [{"id": "profile-1", "name": "Ava", "role": "", "summary": "", "target_roles": [], "seniority_level": "mid", "years_experience": 0, "domains": [], "strengths": [], "preferred_locations": [], "remote_preference": False, "daily_apply_cap": 5, "active": True}]
+                if method == "PATCH" and table == "bot_profiles":
+                    return [{"id": "profile-1"}]
+                if method == "POST" and table == "answer_bank":
+                    return [{"id": "answer-1", **body}]
                 return []
 
         database = FakeDatabase()
         user = AuthenticatedUser("user-1", "user@example.com", "access-token")
         profile = api_main.get_profile(user=user, db=database)
         self.assertEqual(profile["full_name"], "Ava")
+        self.assertEqual(database.calls[0][2]["user_id"], "eq.user-1")
         updated = api_main.update_profile(
             payload=api_main.ProfileUpdate(full_name="Ava Lee", headline="Senior engineer", target_roles=["backend"], strengths=["Python"]),
             user=user,
             db=database,
         )
         self.assertEqual(updated["full_name"], "Ava Lee")
+        self.assertEqual(database.calls[-1][1], "bot_profiles")
+        self.assertEqual(database.calls[-1][3]["name"], "Ava Lee")
         answer = api_main.add_answer_bank_entry(
             payload=api_main.AnswerBankEntry(question="Why us?", answer="Because I fit the mission.", tags=["motivation"]),
             user=user,
             db=database,
         )
         self.assertIn("Why us?", answer["question"])
+        self.assertEqual(database.calls[-1][3]["user_id"], "user-1")
 
     def test_resume_preview_is_private_and_scoped_to_the_current_user(self):
         class FakeDatabase:
@@ -388,6 +395,8 @@ class WebFeatureTests(unittest.TestCase):
                     if params["status"] == "eq.sending":
                         return [{"id": "application-1", "status": "applied"}]
                     return [{"id": "application-1"}]
+                if method == "POST" and table == "application_events":
+                    return None
                 raise AssertionError(f"Unexpected database request: {method} {table}")
 
             def storage_request(self, method, path):
@@ -456,6 +465,8 @@ class WebFeatureTests(unittest.TestCase):
                 if method == "PATCH" and table == "applications":
                     self.patches.append((params, body))
                     return [{"id": "application-1", "status": body["status"], **body}]
+                if method == "POST" and table == "application_events":
+                    return None
                 raise AssertionError(f"Unexpected database request: {method} {table}")
 
             def storage_request(self, method, path):
