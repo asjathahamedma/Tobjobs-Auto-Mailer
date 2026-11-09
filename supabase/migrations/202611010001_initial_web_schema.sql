@@ -115,6 +115,67 @@ create table public.applications (
   unique (user_id, idempotency_key)
 );
 
+create table public.bot_profiles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null default '',
+  role text not null default '',
+  summary text not null default '',
+  target_roles text[] not null default '{}',
+  strengths text[] not null default '{}',
+  preferred_locations text[] not null default '{}',
+  remote_preference boolean not null default false,
+  daily_apply_cap integer not null default 5 check (daily_apply_cap >= 1),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, id)
+);
+
+create table public.education (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  school text not null default '',
+  degree text not null default '',
+  field_of_study text not null default '',
+  start_year integer,
+  end_year integer,
+  notes text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create table public.work_experience (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  company text not null default '',
+  role text not null default '',
+  start_date text not null default '',
+  end_date text not null default '',
+  summary text not null default '',
+  achievements text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create table public.answer_bank (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  question text not null,
+  answer text not null,
+  tags text[] not null default '{}',
+  is_default boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.application_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  application_id uuid references public.applications(id) on delete cascade,
+  event_type text not null default 'note',
+  details text not null default '',
+  created_at timestamptz not null default now()
+);
+
 create table public.search_run_events (
   id bigint generated always as identity primary key,
   user_id uuid not null references auth.users(id) on delete cascade,

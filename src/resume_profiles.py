@@ -85,6 +85,55 @@ def _ranked_hits(text: str, keywords: list[str]) -> list[str]:
     return sorted(counts, key=lambda keyword: (-counts[keyword], positions[keyword]))
 
 
+def _infer_years_experience(text: str) -> int:
+    matches = re.findall(r"(\d{1,2})\s*(?:\+\s*)?years?", text.lower())
+    if matches:
+        years = max(int(value) for value in matches)
+        return years
+    return 0
+
+
+def _infer_seniority_level(text: str, years_experience: int) -> str:
+    if "manager" in text.lower() or "director" in text.lower():
+        return "manager/director"
+    if "lead" in text.lower() or "principal" in text.lower():
+        return "lead/principal"
+    if years_experience >= 8:
+        return "senior"
+    if years_experience >= 4:
+        return "mid"
+    if years_experience >= 2:
+        return "junior/entry"
+    return "intern/trainee"
+
+
+def _infer_target_roles(text: str, title_keywords: list[str]) -> list[str]:
+    found: list[str] = []
+    for keyword in ADDITIONAL_TITLE_KEYWORDS:
+        if keyword.lower() in text.lower() and keyword not in found:
+            found.append(keyword)
+    for keyword in title_keywords:
+        if keyword not in found:
+            found.append(keyword)
+    return found[:5]
+
+
+def _infer_domains(text: str, description_keywords: list[str]) -> list[str]:
+    domains = []
+    lowered = text.lower()
+    if any(term in lowered for term in ["react", "frontend", "ui", "ux", "css", "html", "javascript", "typescript"]):
+        domains.append("frontend")
+    if any(term in lowered for term in ["python", "node", "api", "backend", "database", "sql", "fastapi", "django", "express"]):
+        domains.append("backend")
+    if any(term in lowered for term in ["data", "sql", "pandas", "spark", "warehouse", "etl", "analytics", "machine learning"]):
+        domains.append("data")
+    if any(term in lowered for term in ["aws", "azure", "gcp", "kubernetes", "docker", "terraform", "devops"]):
+        domains.append("cloud/devops")
+    if not domains:
+        domains = list(dict.fromkeys(description_keywords[:3]))
+    return domains[:5]
+
+
 def build_resume_profile(text: str, file_name: str) -> dict:
     templates = get_profile_templates()
     vocabulary: list[str] = list(COMMON_KEYWORDS)
@@ -106,9 +155,27 @@ def build_resume_profile(text: str, file_name: str) -> dict:
     summary = template.get("summary", "") if score else ""
     if not summary:
         summary = f"Resume profile based on the detected skills: {', '.join(detected_keywords[:4]) or name}."
+
+    years_experience = _infer_years_experience(text)
+    seniority_level = _infer_seniority_level(text, years_experience)
+    target_roles = _infer_target_roles(text, title_keywords)
+    core_skills = list(dict.fromkeys(description_keywords[:8]))
+    domains = _infer_domains(text, description_keywords)
     return {
         "label": template.get("label") if score else name or "Resume profile",
         "summary": summary,
         "title_keywords": title_keywords or template.get("title_keywords", [])[:10],
         "description_keywords": description_keywords,
+        "target_roles": target_roles,
+        "seniority_level": seniority_level,
+        "years_experience": years_experience,
+        "core_skills": core_skills,
+        "domains": domains,
+        "include_keywords": list(dict.fromkeys(title_keywords[:12] + description_keywords[:12])),
+        "exclude_keywords": [],
+        "preferred_locations": [],
+        "remote_preference": False,
+        "min_match_score": 4,
+        "daily_apply_cap": 5,
+        "active": True,
     }

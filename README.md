@@ -38,7 +38,15 @@ APP_CREDENTIALS_ENCRYPTION_KEY=YOUR_FERNET_KEY
 WEB_ALLOWED_ORIGINS=http://localhost:3000
 SEARCH_QUEUE_BACKEND=local
 VERCEL_QUEUE_REGION=iad1
+GROQ_API_KEY=YOUR_SERVER_ONLY_GROQ_KEY
+GEMINI_API_KEY=YOUR_SERVER_ONLY_GEMINI_KEY
+GROQ_MODEL=llama-3.3-70b-versatile
+GEMINI_MODEL=gemini-2.5-flash
+AI_PROVIDER_ORDER=groq,gemini
+AI_ENABLE_FEATURES=true
 ```
+
+The AI layer is centralised under `web_backend/app/ai/` and reads all provider configuration from server-side environment variables only. Keys are never exposed to the browser, logged, or committed. Prompts redact contact details (email, phone, addresses, and dates) before any provider call.
 
 Generate a Fernet key locally; keep it private and do not change it after saving Gmail credentials unless you are prepared to re-enter them:
 

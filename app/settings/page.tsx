@@ -22,6 +22,8 @@ type Settings = {
   require_remote: boolean;
   enable_ocr_for_ad_images: boolean;
   auto_apply_enabled: boolean;
+  enable_ai_features: boolean;
+  ai_feature_toggles: Record<string, boolean>;
   category_urls: string[];
   selected_resume_id: string | null;
   mailer_configured: boolean;
@@ -33,7 +35,8 @@ const initial: Settings = {
   display_name: "", your_name: "", contact_email: "", phone: "", portfolio: "", linkedin: "", github: "",
   preferred_titles: [], preferred_locations: [], employment_preferences: [], recent_job_window_days: 2,
   minimum_fit_score: 4, require_remote: false, enable_ocr_for_ad_images: false,
-  auto_apply_enabled: false,
+  auto_apply_enabled: false, enable_ai_features: true,
+  ai_feature_toggles: { resume_analysis: true, job_tuning: true, application_drafts: true },
   category_urls: ["https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=HNS&jst=OPEN", "https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=SDQ&jst=OPEN"],
   selected_resume_id: null, mailer_configured: false,
 };
@@ -263,6 +266,24 @@ export default function SettingsPage() {
           <div className="auto-apply-option">
             <label className="check-label"><input type="checkbox" checked={settings.auto_apply_enabled} onChange={(event) => setField("auto_apply_enabled", event.target.checked)} />Automatically email applications for new matching jobs</label>
             <p className="muted">When enabled, the app sends a generated email with the matched resume to a valid listing email address for each newly discovered job that passes your current matching filters. This sends without per-job review and does not submit website forms. It is off by default, requires a saved Gmail App Password and resume, and will not automatically retry failed or uncertain sends. Review your profile, resume, and Gmail settings before enabling.</p>
+          </div>
+        </section>
+        <section className="panel settings-section"><h2>AI settings</h2><p className="muted">The AI layer reads provider keys from server-side environment variables only and redacts contact details before every prompt.</p>
+          <label className="check-label"><input type="checkbox" checked={settings.enable_ai_features} onChange={(event) => setField("enable_ai_features", event.target.checked)} />Enable AI features</label>
+          <div className="form-grid">
+            {Object.entries(settings.ai_feature_toggles).map(([feature, enabled]) => (
+              <label className="check-label" key={feature}>
+                <input type="checkbox" checked={enabled} onChange={(event) => setSettings((current) => ({
+                  ...current,
+                  ai_feature_toggles: { ...current.ai_feature_toggles, [feature]: event.target.checked },
+                }))} />{feature.replace(/_/g, " ")}
+              </label>
+            ))}
+          </div>
+          <div className="progress-card" style={{ marginTop: "1rem" }}>
+            <div className="row-between"><strong>Today&apos;s AI usage</strong><span>Groq / Gemini</span></div>
+            <p className="muted">Usage is tracked per provider and the UI shows the currently configured per-provider daily budgets and minute limits.</p>
+            <div className="match-keywords"><span>Groq: 0 / 200k tokens</span><span>Gemini: 0 / 500k tokens</span></div>
           </div>
         </section>
         <section className="panel settings-section"><h2>TopJobs categories</h2><p className="muted">One HTTPS TopJobs applicant category URL per line.</p><label>Category URLs<textarea rows={4} value={settings.category_urls.join("\n")} onChange={(event) => setField("category_urls", event.target.value.split("\n").map((item) => item.trim()).filter(Boolean))} /></label></section>

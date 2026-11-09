@@ -133,6 +133,133 @@ class ResumeProfile(Base):
     )
 
 
+class BotProfile(Base):
+    __tablename__ = "bot_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    role: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    target_roles: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    strengths: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    preferred_locations: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    remote_preference: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    daily_apply_cap: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("id", "user_id", name="uq_bot_profiles_id_user"),
+        Index("ix_bot_profiles_user_created", "user_id", "created_at"),
+    )
+
+
+class EducationEntry(Base):
+    __tablename__ = "education"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    school: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
+    degree: Mapped[str] = mapped_column(String(150), nullable=False, server_default="")
+    field_of_study: Mapped[str] = mapped_column(String(150), nullable=False, server_default="")
+    start_year: Mapped[int | None] = mapped_column(Integer)
+    end_year: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_education_user_created", "user_id", "created_at"),
+    )
+
+
+class WorkExperienceEntry(Base):
+    __tablename__ = "work_experience"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    company: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
+    role: Mapped[str] = mapped_column(String(150), nullable=False, server_default="")
+    start_date: Mapped[str] = mapped_column(String(20), nullable=False, server_default="")
+    end_date: Mapped[str] = mapped_column(String(20), nullable=False, server_default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    achievements: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_work_experience_user_created", "user_id", "created_at"),
+    )
+
+
+class AnswerBankEntryRecord(Base):
+    __tablename__ = "answer_bank"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_answer_bank_user_created", "user_id", "created_at"),
+    )
+
+
+class ApplicationEvent(Base):
+    __tablename__ = "application_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, server_default="note")
+    details: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_application_events_user_created", "user_id", "created_at"),
+    )
+
+
 class ResumeFile(Base):
     __tablename__ = "resume_files"
 
@@ -157,6 +284,30 @@ class ResumeFile(Base):
         ),
         CheckConstraint("size_bytes > 0", name="resume_file_size_positive"),
         Index("ix_resume_files_user_profile", "user_id", "profile_id"),
+    )
+
+
+class AIUsage(Base):
+    __tablename__ = "ai_usage"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    task: Mapped[str] = mapped_column(String(120), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="success")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_ai_usage_user_created", "user_id", created_at.desc()),
+        Index("ix_ai_usage_task_created", "task", created_at.desc()),
     )
 
 

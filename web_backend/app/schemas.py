@@ -30,6 +30,14 @@ class SettingsUpdate(BaseModel):
     require_remote: bool = False
     enable_ocr_for_ad_images: bool = False
     auto_apply_enabled: bool = False
+    enable_ai_features: bool = True
+    ai_feature_toggles: dict[str, bool] = Field(
+        default_factory=lambda: {
+            "resume_analysis": True,
+            "job_tuning": True,
+            "application_drafts": True,
+        }
+    )
     category_urls: list[str] = Field(
         default_factory=lambda: [
             "https://www.topjobs.lk/applicant/vacancybyfunctionalarea.jsp?FA=HNS&jst=OPEN",
@@ -129,4 +137,41 @@ class ResumeUpdate(BaseModel):
         cleaned = [value.strip() for value in values if value.strip()]
         if any(len(value) > 100 for value in cleaned):
             raise ValueError("Each resume keyword must be 100 characters or fewer.")
+        return list(dict.fromkeys(cleaned))
+
+
+class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    full_name: str = Field(default="", max_length=120)
+    headline: str = Field(default="", max_length=200)
+    summary: str = Field(default="", max_length=5000)
+    target_roles: list[str] = Field(default_factory=list)
+    seniority_level: str = Field(default="mid", max_length=40)
+    years_experience: int = Field(default=0, ge=0, le=60)
+    domains: list[str] = Field(default_factory=list)
+    preferred_locations: list[str] = Field(default_factory=list)
+    remote_preference: bool = False
+    daily_apply_cap: int = Field(default=5, ge=1, le=50)
+    active: bool = True
+    strengths: list[str] = Field(default_factory=list)
+
+    @field_validator("target_roles", "domains", "preferred_locations", "strengths")
+    @classmethod
+    def clean_profile_lists(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
+        return list(dict.fromkeys(cleaned))
+
+
+class AnswerBankEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str | None = None
+    question: str = Field(min_length=3, max_length=500)
+    answer: str = Field(min_length=1, max_length=8000)
+    tags: list[str] = Field(default_factory=list)
+    is_default: bool = False
+
+    @field_validator("tags")
+    @classmethod
+    def clean_tags(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
         return list(dict.fromkeys(cleaned))

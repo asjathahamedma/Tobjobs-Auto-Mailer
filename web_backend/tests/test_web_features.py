@@ -44,6 +44,33 @@ class WebFeatureTests(unittest.TestCase):
         self.assertLessEqual(len(profile["title_keywords"]), 30)
         self.assertLessEqual(len(profile["description_keywords"]), 60)
 
+    def test_profile_and_answer_bank_store_in_user_settings(self):
+        class FakeDatabase:
+            def request(self, method, table, *, params=None, body=None, **kwargs):
+                if method == "GET" and table == "user_settings":
+                    return [{"settings": {"profile": {"full_name": "Ava"}, "answer_bank": [{"id": "existing", "question": "Q", "answer": "A", "tags": ["intro"]}]}}]
+                if method == "POST" and table == "user_settings":
+                    self.saved = body
+                    return [{"settings": body["settings"]}]
+                return []
+
+        database = FakeDatabase()
+        user = AuthenticatedUser("user-1", "user@example.com", "access-token")
+        profile = api_main.get_profile(user=user, db=database)
+        self.assertEqual(profile["full_name"], "Ava")
+        updated = api_main.update_profile(
+            payload=api_main.ProfileUpdate(full_name="Ava Lee", headline="Senior engineer", target_roles=["backend"], strengths=["Python"]),
+            user=user,
+            db=database,
+        )
+        self.assertEqual(updated["full_name"], "Ava Lee")
+        answer = api_main.add_answer_bank_entry(
+            payload=api_main.AnswerBankEntry(question="Why us?", answer="Because I fit the mission.", tags=["motivation"]),
+            user=user,
+            db=database,
+        )
+        self.assertIn("Why us?", answer["question"])
+
     def test_resume_preview_is_private_and_scoped_to_the_current_user(self):
         class FakeDatabase:
             def request(self, method, table, *, params=None, **kwargs):

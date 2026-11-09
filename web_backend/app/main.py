@@ -25,10 +25,12 @@ from src.web_engine import run_topjobs_search
 from web_backend.app.auth import AuthenticatedUser, require_user, supabase_for_user
 from web_backend.app.content import generate_application_content
 from web_backend.app.schemas import (
+    AnswerBankEntry,
     ApplicationStatus,
     ApplicationUpdate,
     ApprovedSend,
     MailerCredentialUpdate,
+    ProfileUpdate,
     ResumeUpdate,
     RunCreate,
     SettingsUpdate,
@@ -98,6 +100,46 @@ def _read_user_settings(db: SupabaseRest, user: AuthenticatedUser) -> dict[str, 
         return {}
     settings = rows[0].get("settings")
     return settings if isinstance(settings, dict) else {}
+
+
+def _default_profile() -> dict[str, Any]:
+    return {
+        "full_name": "",
+        "headline": "",
+        "summary": "",
+        "target_roles": [],
+        "seniority_level": "mid",
+        "years_experience": 0,
+        "domains": [],
+        "preferred_locations": [],
+        "remote_preference": False,
+        "daily_apply_cap": 5,
+        "active": True,
+        "strengths": [],
+    }
+
+
+def _default_answer_bank() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "default-about",
+            "question": "Tell me about yourself.",
+            "answer": "I am a focused professional with a strong track record of delivering measurable outcomes and collaborating with cross-functional stakeholders.",
+            "tags": ["about"],
+            "is_default": True,
+        }
+    ]
+
+
+def _save_user_settings(db: SupabaseRest, user: AuthenticatedUser, settings: dict[str, Any]) -> dict[str, Any]:
+    db.request(
+        "POST",
+        "user_settings",
+        params={"on_conflict": "user_id"},
+        body={"user_id": user.id, "settings": settings},
+        prefer="resolution=merge-duplicates,return=minimal",
+    )
+    return settings
 
 
 def _settings_defaults() -> dict[str, Any]:
@@ -540,6 +582,62 @@ def get_analytics(
         ) if reviewed else 0,
         "runs": runs,
     }
+
+
+@app.get("/api/profile")
+def get_profile(
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    settings = _read_user_settings(db, user)
+    profile = settings.get("profile") if isinstance(settings.get("profile"), dict) else {}
+    return {**_default_profile(), **profile}
+
+
+@app.patch("/api/profile")
+def update_profile(
+    payload: ProfileUpdate,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    settings = _read_user_settings(db, user)
+    profile = {**_default_profile(), **settings.get("profile", {})}
+    profile.update(payload.model_dump())
+    settings["profile"] = profile
+    _save_user_settings(db, user, settings)
+    return profile
+
+
+@app.get("/api/answer-bank")
+def get_answer_bank(
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    settings = _read_user_settings(db, user)
+    entries = settings.get("answer_bank")
+    if not isinstance(entries, list) or not entries:
+        return _default_answer_bank()
+    return entries
+
+
+@app.post("/api/answer-bank")
+def add_answer_bank_entry(
+    payload: AnswerBankEntry,
+    user: Annotated[AuthenticatedUser, Depends(require_user)],
+    db: Annotated[SupabaseRest, Depends(supabase_for_user)],
+):
+    settings = _read_user_settings(db, user)
+    entries = settings.get("answer_bank")
+    if not isinstance(entries, list):
+        entries = []
+    item = payload.model_dump()
+    if not item.get("id"):
+        item["id"] = f"entry-{uuid.uuid4()}"
+    entries = [entry for entry in entries if entry.get("id") != item["id"]]
+    entries.append(item)
+    settings["answer_bank"] = entries
+    _save_user_settings(db, user, settings)
+    return item
 
 
 @app.patch("/api/settings")

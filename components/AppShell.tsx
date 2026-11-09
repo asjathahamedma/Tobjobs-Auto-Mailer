@@ -1,6 +1,6 @@
 "use client";
 
-import { BriefcaseBusiness, ChartNoAxesCombined, FileText, Settings, LogOut } from "lucide-react";
+import { BriefcaseBusiness, ChartNoAxesCombined, FileText, FileStack, Settings, LogOut, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useState } from "react";
@@ -8,8 +8,10 @@ import { createClient } from "@/lib/supabase/browser";
 
 const navigation = [
   { href: "/dashboard", label: "Overview", icon: ChartNoAxesCombined },
+  { href: "/profile", label: "Profile", icon: UserRound },
   { href: "/jobs", label: "Matched jobs", icon: BriefcaseBusiness },
   { href: "/applications", label: "Applications", icon: FileText },
+  { href: "/answer-bank", label: "Answer bank", icon: FileStack },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
